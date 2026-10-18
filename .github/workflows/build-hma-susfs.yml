@@ -2,25 +2,6 @@ name: Build HMA-susfs (APK + Zygisk module)
 
 on:
   workflow_dispatch:
-    inputs:
-      hma_ref:
-        description: "HMA-OSS ref (tag/branch) fallback when the commit cannot be fetched"
-        required: false
-        type: string
-        default: "oss-173"
-      hma_commit:
-        description: "HMA-OSS commit (overrides upstream/hma-oss.env)"
-        required: false
-        type: string
-      susfs_commit:
-        description: "SUSFS commit (overrides upstream/susfs.env)"
-        required: false
-        type: string
-      ndk_version:
-        description: "Android NDK version"
-        required: false
-        type: string
-        default: "26.1.10909125"
 
 permissions:
   contents: read
