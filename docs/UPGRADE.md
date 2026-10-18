@@ -64,5 +64,5 @@ HMA-OSS 升级会覆盖两个 asset：
 detector target pairs = 6
 全局 hidden uid 命令计数 = 0
 hide_from 条目 > 2000
-检测器界面: 已完成 112 项 / 异常 1 项（USB 调试）
+检测器界面: 已完成 156 项 / 异常 1 项（USB 调试）
 ```
