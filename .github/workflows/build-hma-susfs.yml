@@ -16,11 +16,6 @@ on:
         description: "SUSFS commit (overrides upstream/susfs.env)"
         required: false
         type: string
-      ndk_version:
-        description: "Android NDK version"
-        required: false
-        type: string
-        default: "26.1.10909125"
 
 permissions:
   contents: read
@@ -46,10 +41,21 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: ${{ inputs.ndk_version }}
+      - name: Locate NDK (preinstalled on the runner)
+        run: |
+          set -euo pipefail
+          NDK="${ANDROID_NDK_HOME:-}"
+          if [ -z "$NDK" ] || [ ! -x "$NDK/ndk-build" ]; then
+            NDK="$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          if [ ! -x "$NDK/ndk-build" ]; then
+            echo "::error::no usable NDK found under $ANDROID_HOME/ndk"
+            exit 1
+          fi
+          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "using NDK: $NDK"
+          "$NDK/ndk-build" --version | head -n 2
 
       - name: Fetch pinned upstream
         run: |
@@ -60,7 +66,6 @@ jobs:
       - name: Build ksu_susfs (per-target patches)
         run: |
           set -euo pipefail
-          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
           ./cli/build-cli.sh "$WORK/susfs" "$WORK/out"
 
       - name: Overlay device assets
