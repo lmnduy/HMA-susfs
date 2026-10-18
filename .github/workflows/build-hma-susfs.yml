@@ -6,16 +6,20 @@ on:
       hma_ref:
         description: "HMA-OSS ref (tag/branch) fallback when the commit cannot be fetched"
         required: false
+        type: string
         default: "oss-173"
       hma_commit:
         description: "HMA-OSS commit (overrides upstream/hma-oss.env)"
         required: false
+        type: string
       susfs_commit:
         description: "SUSFS commit (overrides upstream/susfs.env)"
         required: false
+        type: string
       ndk_version:
         description: "Android NDK version"
         required: false
+        type: string
         default: "26.1.10909125"
 
 permissions:
@@ -35,7 +39,7 @@ jobs:
           if [ -n "${{ inputs.hma_ref }}" ];    then sed -i "s|^HMA_REF=.*|HMA_REF=${{ inputs.hma_ref }}|"       upstream/hma-oss.env; fi
           if [ -n "${{ inputs.hma_commit }}" ]; then sed -i "s|^HMA_COMMIT=.*|HMA_COMMIT=${{ inputs.hma_commit }}|" upstream/hma-oss.env; fi
           if [ -n "${{ inputs.susfs_commit }}" ]; then sed -i "s|^SUSFS_COMMIT=.*|SUSFS_COMMIT=${{ inputs.susfs_commit }}|" upstream/susfs.env; fi
-          grep -E '^(HMA|SUSFS)_(REPO|REF|COMMIT)=' upstream/*.env
+          grep -E '^(HMA|SUSFS)_(REPO|REF|COMMIT)=' upstream/hma-oss.env upstream/susfs.env
 
       - uses: actions/setup-java@v4
         with:
@@ -50,7 +54,7 @@ jobs:
       - name: Fetch pinned upstream
         run: |
           set -euo pipefail
-          chmod +x scripts/*.sh cli/*.sh patches/*.sh
+          chmod +x scripts/fetch-upstream.sh scripts/overlay-device.sh cli/build-cli.sh
           ./scripts/fetch-upstream.sh "$WORK"
 
       - name: Build ksu_susfs (per-target patches)
@@ -76,7 +80,6 @@ jobs:
         working-directory: ${{ env.WORK }}/hma-oss
         run: |
           set -euo pipefail
-          # force regeneration of the embedded manager APK and signature info
           rm -f zygote/src/main/assets/manager.apk
           rm -rf zygote/build/generated/source/signInfo
           ./gradlew --no-daemon :zygote:assembleDebug
