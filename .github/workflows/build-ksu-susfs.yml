@@ -3,18 +3,10 @@ name: Build ksu_susfs (per-target patches)
 on:
   workflow_dispatch:
     inputs:
-      susfs_repo:
-        description: "SUSFS repo URL"
-        required: true
-        default: "https://gitlab.com/simonpunk/susfs4ksu.git"
-      susfs_ref:
-        description: "SUSFS branch/tag/commit (e.g. gki-android14-6.1)"
-        required: true
-        default: "gki-android14-6.1"
-      ndk_version:
-        description: "Android NDK version"
-        required: true
-        default: "26.1.10909125"
+      susfs_commit:
+        description: "SUSFS commit (overrides upstream/susfs.env)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -25,23 +17,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: ${{ inputs.ndk_version }}
-
-      - name: Fetch SUSFS
+      - name: Apply pin overrides
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch "${{ inputs.susfs_ref }}" "${{ inputs.susfs_repo }}" susfs
-          git -C susfs log -1 --oneline
+          if [ -n "${{ inputs.susfs_commit }}" ]; then
+            sed -i "s|^SUSFS_COMMIT=.*|SUSFS_COMMIT=${{ inputs.susfs_commit }}|" upstream/susfs.env
+          fi
+          cat upstream/susfs.env
 
-      - name: Apply CLI patches
+      - name: Locate NDK (preinstalled on the runner)
         run: |
           set -euo pipefail
-          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
-          chmod +x cli/build-cli.sh patches/*.sh
-          ./cli/build-cli.sh "$PWD/susfs" "$PWD/out"
+          NDK="${ANDROID_NDK_HOME:-}"
+          if [ -z "$NDK" ] || [ ! -x "$NDK/ndk-build" ]; then
+            NDK="$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          if [ ! -x "$NDK/ndk-build" ]; then
+            echo "::error::no usable NDK found under $ANDROID_HOME/ndk"
+            exit 1
+          fi
+          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
+          echo "using NDK: $NDK"
+
+      - name: Fetch pinned SUSFS
+        run: |
+          set -euo pipefail
+          chmod +x scripts/fetch-susfs.sh scripts/overlay-device.sh cli/build-cli.sh patches/apply-all.sh
+          ./scripts/fetch-susfs.sh "$GITHUB_WORKSPACE/.work/susfs"
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          ./cli/build-cli.sh "$GITHUB_WORKSPACE/.work/susfs" "$GITHUB_WORKSPACE/out"
 
       - name: Verify commands
         run: |

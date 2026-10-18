@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Build ksu_susfs with the per-target UID patches applied (CLI only).
+# Build ksu_susfs with the full per-target patch chain.
 #
 # usage: ./cli/build-cli.sh <susfs_src_dir> [out_dir]
 #
-# Requires: python3, Android NDK (ANDROID_NDK_HOME or ANDROID_NDK_ROOT).
+# The chain itself lives in patches/apply-all.sh so that CI, the kernel build
+# and manual builds all use the same order (60.patch -> hide_from -> hidden_uid
+# -> hidden_uid_from).  Requires: python3, Android NDK.
 set -euo pipefail
 
 SUSFS_DIR=${1:?usage: build-cli.sh <susfs_src_dir> [out_dir]}
@@ -18,24 +20,17 @@ fi
 
 mkdir -p "$OUT_DIR"
 
-echo "[1/4] hide_from (CLI only)"
-python3 "$REPO_ROOT/patches/patch_hide_from_cli_only.py" "$SUSFS_DIR"
+echo "[1/2] apply patch chain (CLI mode)"
+"$REPO_ROOT/patches/apply-all.sh" "$SUSFS_DIR"
 
-echo "[2/4] global hidden uid"
-python3 "$REPO_ROOT/patches/patch_susfs_hidden_uid.py" "$SUSFS_DIR"
-
-echo "[3/4] per-target hidden uid (CLI only)"
-ABK_CLI_ONLY=1 python3 "$REPO_ROOT/patches/patch_susfs_hidden_uid_from.py" "$SUSFS_DIR" "$SUSFS_DIR"
-
-echo "[4/4] ndk-build"
+echo "[2/2] ndk-build"
 "$NDK/ndk-build" -C "$SUSFS_DIR/ksu_susfs" -j"$(nproc 2>/dev/null || echo 4)"
 
 BIN="$SUSFS_DIR/ksu_susfs/libs/arm64-v8a/ksu_susfs"
 [ -f "$BIN" ] || { echo "::error::ksu_susfs binary not produced" >&2; exit 1; }
 cp -f "$BIN" "$OUT_DIR/ksu_susfs"
-echo "built: $OUT_DIR/ksu_susfs ($(wc -c < "$OUT_DIR/ksu_susfs") bytes)"
 
 for cmd in add_sus_path_hide_from add_hidden_uid add_hidden_uid_from; do
   grep -q "$cmd" "$OUT_DIR/ksu_susfs" || { echo "::error::missing command $cmd" >&2; exit 1; }
 done
-echo "all three commands present"
+echo "built: $OUT_DIR/ksu_susfs ($(wc -c < "$OUT_DIR/ksu_susfs") bytes), all three commands present"
