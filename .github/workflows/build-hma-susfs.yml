@@ -78,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          chmod +x gradlew patches/apply-all.sh
+          chmod +x gradlew
           ./gradlew --no-daemon :app:assembleDebug
 
       - name: Build Zygisk module
