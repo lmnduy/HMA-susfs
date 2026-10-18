@@ -145,7 +145,7 @@ GitHub Actions 手动跑 **Build HMA-susfs (APK + Zygisk module)**，可选输�
 
 | 产物 | 在哪个仓库构建 | 原因 |
 |---|---|---|
-| **内核**（0x55554 / 0x55555 / 0x55556） | **`lmnduy/ABK`（魔改版）** | 只有它带 `patches/60_add_per_uid_sus_path.patch`、三个 SUSFS 补丁脚本，以及 `build.yml` 里的补丁步骤与 dispatch 注入 |
+| **内核**（0x55554 / 0x55555 / 0x55556） | **`lmnduy/ABK`** | 只有它带 `patches/60_add_per_uid_sus_path.patch`、三个 SUSFS 补丁脚本，以及 `build.yml` 里的补丁步骤与 dispatch 注入 |
 | `ksu_susfs` CLI | 本仓库 `cli/build-cli.sh` / 本仓库 CI | 只要 SUSFS 源码 + NDK；也可复用 ABK 的 CLI 产物 |
 | 管理器 APK + Zygisk 模块 | 本仓库 `build-hma-susfs.yml` | HMA-OSS 源码已 vendored |
 
