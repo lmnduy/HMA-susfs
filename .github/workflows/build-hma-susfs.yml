@@ -1,0 +1,96 @@
+name: Build HMA-susfs (APK + Zygisk module)
+
+on:
+  workflow_dispatch:
+    inputs:
+      hma_ref:
+        description: "HMA-OSS ref (tag/branch) fallback when the commit cannot be fetched"
+        required: false
+        default: "oss-173"
+      hma_commit:
+        description: "HMA-OSS commit (overrides upstream/hma-oss.env)"
+        required: false
+      susfs_commit:
+        description: "SUSFS commit (overrides upstream/susfs.env)"
+        required: false
+      ndk_version:
+        description: "Android NDK version"
+        required: false
+        default: "26.1.10909125"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      WORK: ${{ runner.temp }}/upstream
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply pin overrides
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.hma_ref }}" ];    then sed -i "s|^HMA_REF=.*|HMA_REF=${{ inputs.hma_ref }}|"       upstream/hma-oss.env; fi
+          if [ -n "${{ inputs.hma_commit }}" ]; then sed -i "s|^HMA_COMMIT=.*|HMA_COMMIT=${{ inputs.hma_commit }}|" upstream/hma-oss.env; fi
+          if [ -n "${{ inputs.susfs_commit }}" ]; then sed -i "s|^SUSFS_COMMIT=.*|SUSFS_COMMIT=${{ inputs.susfs_commit }}|" upstream/susfs.env; fi
+          grep -E '^(HMA|SUSFS)_(REPO|REF|COMMIT)=' upstream/*.env
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ inputs.ndk_version }}
+
+      - name: Fetch pinned upstream
+        run: |
+          set -euo pipefail
+          chmod +x scripts/*.sh cli/*.sh patches/*.sh
+          ./scripts/fetch-upstream.sh "$WORK"
+
+      - name: Build ksu_susfs (per-target patches)
+        run: |
+          set -euo pipefail
+          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+          ./cli/build-cli.sh "$WORK/susfs" "$WORK/out"
+
+      - name: Overlay device assets
+        run: |
+          set -euo pipefail
+          ./scripts/overlay-device.sh "$WORK/hma-oss" "$WORK/out/ksu_susfs"
+
+      - name: Build APK
+        working-directory: ${{ env.WORK }}/hma-oss
+        run: |
+          set -euo pipefail
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Build Zygisk module
+        working-directory: ${{ env.WORK }}/hma-oss
+        run: |
+          set -euo pipefail
+          # force regeneration of the embedded manager APK and signature info
+          rm -f zygote/src/main/assets/manager.apk
+          rm -rf zygote/build/generated/source/signInfo
+          ./gradlew --no-daemon :zygote:assembleDebug
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          find "$WORK/hma-oss/app/build/outputs/apk/debug" -name '*.apk' -exec cp -v {} out/ \;
+          find "$WORK/hma-oss/zygote/build/outputs/magisk/debug" -name '*.zip' -exec cp -v {} out/ \;
+          cp -v "$WORK/out/ksu_susfs" out/ksu_susfs
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hma-susfs-apk-and-module
+          path: out/*
