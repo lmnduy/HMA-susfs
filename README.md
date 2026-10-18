@@ -13,7 +13,6 @@ SUSFS 自带的 `add_hidden_uid` 是**全局**表，隐藏一个包会让所有�
 * 隐藏 X 于 A：只有 A 看到 "uid 不存在"
 * 隐藏 X 于 A 不影响 B、C
 * 目标永远不会"隐藏自己"（除非显式配置）
-* 注意：本项目的hma隐藏功能需要结合编译的内核实现 https://github.com/lmnduy/ABK
 
 ## 组件
 
