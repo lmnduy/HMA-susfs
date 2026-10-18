@@ -3,15 +3,6 @@ name: Build HMA-susfs (APK + Zygisk module)
 on:
   workflow_dispatch:
     inputs:
-      hma_ref:
-        description: "HMA-OSS ref (tag/branch) fallback when the commit cannot be fetched"
-        required: false
-        type: string
-        default: "oss-173"
-      hma_commit:
-        description: "HMA-OSS commit (overrides upstream/hma-oss.env)"
-        required: false
-        type: string
       susfs_commit:
         description: "SUSFS commit (overrides upstream/susfs.env)"
         required: false
@@ -31,10 +22,10 @@ jobs:
       - name: Apply pin overrides
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.hma_ref }}" ];    then sed -i "s|^HMA_REF=.*|HMA_REF=${{ inputs.hma_ref }}|"       upstream/hma-oss.env; fi
-          if [ -n "${{ inputs.hma_commit }}" ]; then sed -i "s|^HMA_COMMIT=.*|HMA_COMMIT=${{ inputs.hma_commit }}|" upstream/hma-oss.env; fi
-          if [ -n "${{ inputs.susfs_commit }}" ]; then sed -i "s|^SUSFS_COMMIT=.*|SUSFS_COMMIT=${{ inputs.susfs_commit }}|" upstream/susfs.env; fi
-          grep -E '^(HMA|SUSFS)_(REPO|REF|COMMIT)=' upstream/hma-oss.env upstream/susfs.env
+          if [ -n "${{ inputs.susfs_commit }}" ]; then
+            sed -i "s|^SUSFS_COMMIT=.*|SUSFS_COMMIT=${{ inputs.susfs_commit }}|" upstream/susfs.env
+          fi
+          cat upstream/susfs.env upstream/hma-oss.env
 
       - uses: actions/setup-java@v4
         with:
@@ -55,26 +46,25 @@ jobs:
           echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
           echo "using NDK: $NDK"
-          "$NDK/ndk-build" --version | head -n 2
 
-      - name: Fetch pinned upstream
+      - name: Fetch pinned SUSFS
         run: |
           set -euo pipefail
-          chmod +x scripts/fetch-upstream.sh scripts/overlay-device.sh cli/build-cli.sh
-          ./scripts/fetch-upstream.sh "$WORK"
+          chmod +x scripts/fetch-susfs.sh scripts/overlay-device.sh cli/build-cli.sh
+          ./scripts/fetch-susfs.sh "$WORK/susfs"
 
       - name: Build ksu_susfs (per-target patches)
         run: |
           set -euo pipefail
           ./cli/build-cli.sh "$WORK/susfs" "$WORK/out"
 
-      - name: Overlay device assets
+      - name: Overlay device assets into the vendored tree
         run: |
           set -euo pipefail
-          ./scripts/overlay-device.sh "$WORK/hma-oss" "$WORK/out/ksu_susfs"
+          ./scripts/overlay-device.sh "$GITHUB_WORKSPACE/hma-oss" "$WORK/out/ksu_susfs"
 
       - name: Build APK
-        working-directory: ${{ github.workspace }}/.work/hma-oss
+        working-directory: ${{ github.workspace }}/hma-oss
         run: |
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
@@ -82,7 +72,7 @@ jobs:
           ./gradlew --no-daemon :app:assembleDebug
 
       - name: Build Zygisk module
-        working-directory: ${{ github.workspace }}/.work/hma-oss
+        working-directory: ${{ github.workspace }}/hma-oss
         run: |
           set -euo pipefail
           rm -f zygote/src/main/assets/manager.apk
@@ -93,8 +83,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          find "$WORK/hma-oss/app/build/outputs/apk/debug" -name '*.apk' -exec cp -v {} out/ \;
-          find "$WORK/hma-oss/zygote/build/outputs/magisk/debug" -name '*.zip' -exec cp -v {} out/ \;
+          find "$GITHUB_WORKSPACE/hma-oss/app/build/outputs/apk/debug" -name '*.apk' -exec cp -v {} out/ \;
+          find "$GITHUB_WORKSPACE/hma-oss/zygote/build/outputs/magisk/debug" -name '*.zip' -exec cp -v {} out/ \;
           cp -v "$WORK/out/ksu_susfs" out/ksu_susfs
           ls -l out
 

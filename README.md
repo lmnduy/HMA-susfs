@@ -95,36 +95,35 @@ if (which == PRIO_USER && who >= 0 &&
 
 ## 版本锁定与构建产物
 
-上游版本全部用文件锁定，改文件即可换基线（CI 与脚本都读它）：
+| 位置 | 内容 | 锁定方式 |
+|---|---|---|
+| `hma-oss/` | 隐藏列表模块（HMA-OSS）源码 | **vendored**，版本 = 本仓库 commit |
+| `upstream/hma-oss.env` | 来源说明（base commit `5c287a42…`，仅供追溯） | — |
+| `upstream/susfs.env` | SUSFS 仓库 + 分支 + commit | commit pin |
 
-| 文件 | 内容 |
-|---|---|
-| `upstream/hma-oss.env` | 隐藏列表模块（HMA-OSS）仓库 + 分支 + commit |
-| `upstream/susfs.env` | SUSFS 仓库 + 分支 + commit |
-
-当前 pin：
+当前 SUSFS pin：
 
 ```
-HMA-OSS  oss-173  1fe86ce2b4a6f21197e6e92d15e054d609b7d77c
-SUSFS    gki-android14-6.1  5192aa2d33b381b58c1051532f9e1dfa5de6e8d3
+SUSFS  gki-android14-6.1  5192aa2d33b381b58c1051532f9e1dfa5de6e8d3
 ```
 
 ### 一键产出 APK + 模块 zip
 
 ```sh
-./scripts/fetch-upstream.sh /tmp/up        # 按 pin 拉取 HMA-OSS 与 SUSFS
-./cli/build-cli.sh /tmp/up/susfs /tmp/out   # 编 ksu_susfs（三补丁）
-./scripts/overlay-device.sh /tmp/up/hma-oss /tmp/out/ksu_susfs
-cd /tmp/up/hma-oss && ./gradlew :app:assembleDebug
+./scripts/fetch-susfs.sh /tmp/up/susfs          # 按 pin 拉 SUSFS
+./cli/build-cli.sh /tmp/up/susfs /tmp/out        # 编 ksu_susfs（三补丁）
+./scripts/overlay-device.sh ./hma-oss /tmp/out/ksu_susfs
+
+cd hma-oss && ./gradlew :app:assembleDebug
 rm -f zygote/src/main/assets/manager.apk && ./gradlew :zygote:assembleDebug
 ```
 
 产物：
 
-- `app/build/outputs/apk/debug/*.apk` —— 管理器 APK
-- `zygote/build/outputs/magisk/debug/*.zip` —— Zygisk 模块（内含 `manager.apk` 与 `susfs/ksu_susfs`）
+- `hma-oss/app/build/outputs/apk/debug/*.apk` —— 管理器 APK
+- `hma-oss/zygote/build/outputs/magisk/debug/*.zip` —— Zygisk 模块（内含 `manager.apk` 与 `susfs/ksu_susfs`）
 
-GitHub Actions 里手动跑 **Build HMA-susfs (APK + Zygisk module)** 即可，四个输入可选覆盖 pin。
+GitHub Actions 手动跑 **Build HMA-susfs (APK + Zygisk module)**，可选输入 `susfs_commit` 覆盖 SUSFS pin。
 
-> 注意：HMA 的 `versionName/versionCode` 来自 `git rev-list refs/remotes/origin/master`，
-> 所以 `fetch-upstream.sh` 会在 shallow 检出后补建该 ref，保证版本号可复现。
+> HMA 的 `versionName/versionCode` 由 git 提交数推导；源码已随本仓库提交，
+> 因此版本号稳定可复现，不再依赖上游是否仍有那个 commit。
