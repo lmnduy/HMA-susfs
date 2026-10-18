@@ -92,3 +92,39 @@ if (which == PRIO_USER && who >= 0 &&
 
 设备脚本衍生自 **HMA-OSS（AGPL-3.0）**，本仓库整体按 AGPL-3.0 发布；
 出处与第三方项目见 `NOTICE.md`。
+
+## 版本锁定与构建产物
+
+上游版本全部用文件锁定，改文件即可换基线（CI 与脚本都读它）：
+
+| 文件 | 内容 |
+|---|---|
+| `upstream/hma-oss.env` | 隐藏列表模块（HMA-OSS）仓库 + 分支 + commit |
+| `upstream/susfs.env` | SUSFS 仓库 + 分支 + commit |
+
+当前 pin：
+
+```
+HMA-OSS  oss-173  1fe86ce2b4a6f21197e6e92d15e054d609b7d77c
+SUSFS    gki-android14-6.1  5192aa2d33b381b58c1051532f9e1dfa5de6e8d3
+```
+
+### 一键产出 APK + 模块 zip
+
+```sh
+./scripts/fetch-upstream.sh /tmp/up        # 按 pin 拉取 HMA-OSS 与 SUSFS
+./cli/build-cli.sh /tmp/up/susfs /tmp/out   # 编 ksu_susfs（三补丁）
+./scripts/overlay-device.sh /tmp/up/hma-oss /tmp/out/ksu_susfs
+cd /tmp/up/hma-oss && ./gradlew :app:assembleDebug
+rm -f zygote/src/main/assets/manager.apk && ./gradlew :zygote:assembleDebug
+```
+
+产物：
+
+- `app/build/outputs/apk/debug/*.apk` —— 管理器 APK
+- `zygote/build/outputs/magisk/debug/*.zip` —— Zygisk 模块（内含 `manager.apk` 与 `susfs/ksu_susfs`）
+
+GitHub Actions 里手动跑 **Build HMA-susfs (APK + Zygisk module)** 即可，四个输入可选覆盖 pin。
+
+> 注意：HMA 的 `versionName/versionCode` 来自 `git rev-list refs/remotes/origin/master`，
+> 所以 `fetch-upstream.sh` 会在 shallow 检出后补建该 ref，保证版本号可复现。
