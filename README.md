@@ -88,6 +88,19 @@ if (which == PRIO_USER && who >= 0 &&
 
 见 **[docs/UPGRADE.md](docs/UPGRADE.md)**：锚点变了会硬失败（`::error::`），按清单逐项复检即可。
 
+## 上游来源
+
+完整署名、许可与基线说明见 **[NOTICE.md](NOTICE.md)**。一句话版本：
+
+| 上游 | 用途 | 许可 |
+|---|---|---|
+| [HMA-OSS](https://github.com/frknkrc44/HMA-OSS)（作者 frknkrc44） | 隐藏列表模块，源码 vendored 于 `hma-oss/` | AGPL-3.0 |
+| [susfs4ksu](https://gitlab.com/simonpunk/susfs4ksu) | 内核补丁与 CLI 的构建输入 | GPL-2.0 |
+| [KernelSU](https://github.com/tiann/KernelSU) / [BakaSU](https://github.com/Baka-SU/BakaSU) | supercall 派发注入目标 | GPL-2.0 |
+
+> `hma-oss/` 基于上游 **oss-173**（tag `1fe86ce2`）快照；快照中的 `5c287a4`
+> 是本地提交，不是上游 commit。我们的改动只涉及两个 assets 脚本，见 NOTICE.md。
+
 ## 许可
 
 设备脚本衍生自 **HMA-OSS（AGPL-3.0）**，本仓库整体按 AGPL-3.0 发布；
