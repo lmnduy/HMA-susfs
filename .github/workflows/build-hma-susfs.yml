@@ -60,7 +60,7 @@ jobs:
       - name: Fetch pinned SUSFS
         run: |
           set -euo pipefail
-          chmod +x scripts/fetch-susfs.sh scripts/overlay-device.sh cli/build-cli.sh
+          chmod +x scripts/fetch-susfs.sh scripts/overlay-device.sh cli/build-cli.sh patches/apply-all.sh
           ./scripts/fetch-susfs.sh "$WORK/susfs"
 
       - name: Build ksu_susfs (per-target patches)
@@ -78,7 +78,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          chmod +x gradlew
+          chmod +x gradlew patches/apply-all.sh
           ./gradlew --no-daemon :app:assembleDebug
 
       - name: Build Zygisk module

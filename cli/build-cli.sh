@@ -21,7 +21,7 @@ fi
 mkdir -p "$OUT_DIR"
 
 echo "[1/2] apply patch chain (CLI mode)"
-"$REPO_ROOT/patches/apply-all.sh" "$SUSFS_DIR"
+bash "$REPO_ROOT/patches/apply-all.sh" "$SUSFS_DIR"
 
 echo "[2/2] ndk-build"
 "$NDK/ndk-build" -C "$SUSFS_DIR/ksu_susfs" -j"$(nproc 2>/dev/null || echo 4)"
