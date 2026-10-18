@@ -127,3 +127,41 @@ GitHub Actions 手动跑 **Build HMA-susfs (APK + Zygisk module)**，可选输�
 
 > HMA 的 `versionName/versionCode` 由 git 提交数推导；源码已随本仓库提交，
 > 因此版本号稳定可复现，不再依赖上游是否仍有那个 commit。
+
+## 构建分工（重要）
+
+| 产物 | 在哪个仓库构建 | 原因 |
+|---|---|---|
+| **内核**（0x55554 / 0x55555 / 0x55556） | **`lmnduy/ABK`（魔改版）** | 只有它带 `patches/60_add_per_uid_sus_path.patch`、三个 SUSFS 补丁脚本，以及 `build.yml` 里的补丁步骤与 dispatch 注入 |
+| `ksu_susfs` CLI | 本仓库 `cli/build-cli.sh` / 本仓库 CI | 只要 SUSFS 源码 + NDK；也可复用 ABK 的 CLI 产物 |
+| 管理器 APK + Zygisk 模块 | 本仓库 `build-hma-susfs.yml` | HMA-OSS 源码已 vendored |
+
+**为什么不能用原作者的 ABK**：上游 ABK 没有这些补丁与步骤，编出来的内核不认识
+`0x55554/0x55556`，设备侧脚本会静默跳过 —— 表现为"设了隐藏但 uid 层没生效"。
+
+## 补丁顺序（漏一步就失败）
+
+```sh
+./patches/apply-all.sh <susfs_dir>            # 仅 CLI
+./patches/apply-all.sh <susfs_dir> <kern_root> # 内核 + CLI
+```
+
+1. `60_add_per_uid_sus_path.patch` —— **前置**：给 sus_path 结构加 `allowed_uid`
+2. `patch_susfs_hide_from_uid.py` —— 0x55554
+3. `patch_susfs_hidden_uid.py` —— 0x55555
+4. `patch_susfs_hidden_uid_oracle.py` —— getpriority/setpriority 钩子 + 0x55555 派发（仅内核）
+5. `patch_susfs_hidden_uid_from.py` —— 0x55556（含内核树副本 + sys.c 改写 + 派发）
+
+> 第 1 步不能省：少了 `allowed_uid`，第 2 步会报
+> `anchor 'st_susfs_sus_path_hlist allowed_uid' matched 0 times`。
+
+## Windows 上跑补丁的坑
+
+`git apply` / `git checkout` 会按 `core.autocrlf` 把文件写回 **CRLF**，而所有补丁锚点都是 `\n`，
+于是全部报 "matched 0 times"。`apply-all.sh` 已内置行尾归一化；手工跑时先执行：
+
+```sh
+find <susfs_dir> -type f \( -name '*.c' -o -name '*.h' -o -name '*.patch' \) -exec sed -i 's/\r$//' {} +
+```
+
+CI（Linux）不受影响。
