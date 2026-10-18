@@ -27,6 +27,16 @@ jobs:
           fi
           cat upstream/susfs.env upstream/hma-oss.env
 
+      - name: Prepare git metadata for HMA version derivation
+        run: |
+          set -euo pipefail
+          # HMA-OSS derives versionCode from 'git rev-list refs/remotes/origin/master'.
+          # The vendored tree lives inside this repo (no own .git), and this repo's
+          # default branch is main, so create the ref HMA looks for.
+          git update-ref refs/remotes/origin/master HEAD
+          echo "origin/master count: $(git rev-list refs/remotes/origin/master --count)"
+          git rev-parse --short HEAD
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
