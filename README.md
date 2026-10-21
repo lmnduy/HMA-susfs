@@ -178,3 +178,5 @@ find <susfs_dir> -type f \( -name '*.c' -o -name '*.h' -o -name '*.patch' \) -ex
 ```
 
 CI（Linux）不受影响。
+
+> 排障：**挂载间隙 / 同步失败** 的判定与处置见 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)。
