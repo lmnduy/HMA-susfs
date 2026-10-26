@@ -14,6 +14,8 @@ SUSFS 自带的 `add_hidden_uid` 是**全局**表，隐藏一个包会让所有�
 * 隐藏 X 于 A 不影响 B、C
 * 目标永远不会"隐藏自己"（除非显式配置）
 
+变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 组件
 
 | 位置 | 内容 |
