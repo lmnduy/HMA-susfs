@@ -15,23 +15,20 @@ MODDIR=/data/adb/modules/hma_oss_zygisk
 # detector too) and turned uid-visibility probes into "incomplete".
 UID_HIDE_TARGET="${UID_HIDE_TARGET:-com.chunqiunativecheck}"
 
-# INFO: [patch] Re-deploy the standalone per-UID ksu_susfs tool FIRST.
-#   KernelSU ksud is a multi-call applet and re-creates /data/adb/ksu/bin/ksu_susfs
-#   as a hard link to itself on every boot; that applet rejects the per-UID arg.
-#   Placed before set -e and before any file that might be missing, so it can
-#   never be skipped by an earlier failure.
+# INFO: [patch] Deploy the standalone per-UID ksu_susfs tool to ONE private path.
+#   KernelSU ksud is a multi-call applet: it re-links /data/adb/ksu/bin/ksu_susfs
+#   to itself on boot and again whenever the manager runs, and that applet
+#   rejects add_hidden_uid_from / add_sus_path_hide_from.
+#   ABK: this module therefore never writes to /data/adb/ksu/bin and never
+#   resolves the tool through PATH. /data/adb/hma_susfs/bin/ksu_susfs:
+KSU_SUSFS=/data/adb/hma_susfs/bin/ksu_susfs
+
 if [ -f "$MODDIR/susfs/ksu_susfs" ]; then
     chmod 755 "$MODDIR/susfs/ksu_susfs" 2>/dev/null
-    # Stable own path: ksud never recreates this one.
     mkdir -p /data/adb/hma_susfs/bin 2>/dev/null
-    rm -f /data/adb/hma_susfs/bin/ksu_susfs
-    cp -f "$MODDIR/susfs/ksu_susfs" /data/adb/hma_susfs/bin/ksu_susfs
-    chmod 755 /data/adb/hma_susfs/bin/ksu_susfs
-    # Best-effort copy into ksud's applet dir as well (may be re-linked by ksud later).
-    mkdir -p /data/adb/ksu/bin 2>/dev/null
-    rm -f /data/adb/ksu/bin/ksu_susfs
-    cp -f "$MODDIR/susfs/ksu_susfs" /data/adb/ksu/bin/ksu_susfs
-    chmod 755 /data/adb/ksu/bin/ksu_susfs
+    rm -f "$KSU_SUSFS"
+    cp -f "$MODDIR/susfs/ksu_susfs" "$KSU_SUSFS"
+    chmod 755 "$KSU_SUSFS"
 fi
 
 set -e
@@ -71,47 +68,35 @@ cp "$MODDIR/module.prop.bak" "$MODDIR/module.prop"
     #         /data/adb/ksu/bin/ksu_susfs as a hard link to itself on every boot.
     #         That applet does NOT accept the per-UID argument, so re-deploy the
     #         standalone per-UID tool (shipped with this module) before syncing.
-    PERUID_TOOL=
-    for _c in "$MODDIR/susfs/ksu_susfs" /data/adb/hma_susfs/bin/ksu_susfs; do
-        if [ -f "$_c" ]; then
-            PERUID_TOOL="$_c"
-            break
-        fi
-    done
-    if [ -n "$PERUID_TOOL" ]; then
-        mkdir -p /data/adb/ksu/bin 2>/dev/null
-        _want="$(sha256sum "$PERUID_TOOL" 2>/dev/null | cut -d" " -f1)"
-        _have="$(sha256sum /data/adb/ksu/bin/ksu_susfs 2>/dev/null | cut -d" " -f1)"
-        if [ -n "$_want" ] && [ "$_want" != "$_have" ]; then
-            rm -f /data/adb/ksu/bin/ksu_susfs
-            cp -f "$PERUID_TOOL" /data/adb/ksu/bin/ksu_susfs
-            chmod 755 /data/adb/ksu/bin/ksu_susfs
-        fi
-    fi
+    # ABK: single tool path (see top of file). Never the ksud applet in
+    #      /data/adb/ksu/bin, never PATH.
+    KSU_SUSFS=/data/adb/hma_susfs/bin/ksu_susfs
 
-    KSU_SUSFS=
+    susfs_usable() {
+        [ -x "$KSU_SUSFS" ] || return 1
+        "$KSU_SUSFS" 2>&1 | grep -q 'add_hidden_uid_from'
+    }
+
     try=1
     while [ "$try" -le 60 ]; do
-        # INFO: Prefer our own standalone per-UID tool first: ksud re-links
-        #         /data/adb/ksu/bin/ksu_susfs to its applet, which rejects the per-UID arg.
-        for p in "$MODDIR/susfs/ksu_susfs" /data/adb/hma_susfs/bin/ksu_susfs /data/adb/ksu/bin/ksu_susfs /data/adb/ap/bin/ksu_susfs /data/adb/magisk/ksu_susfs /data/adb/ksu/bin/susfs; do
-            if [ -x "$p" ]; then
-                KSU_SUSFS="$p"
-                break
-            fi
-        done
+        susfs_usable && break
 
-        [ -n "$KSU_SUSFS" ] && break
-
-        KSU_SUSFS="$(command -v ksu_susfs 2>/dev/null)" || true
-        [ -n "$KSU_SUSFS" ] && break
+        # re-deploy from the module mount if the private copy is missing or wrong
+        if [ -f "$MODDIR/susfs/ksu_susfs" ]; then
+            mkdir -p /data/adb/hma_susfs/bin 2>/dev/null
+            cp -f "$MODDIR/susfs/ksu_susfs" "$KSU_SUSFS" 2>/dev/null
+            chmod 755 "$KSU_SUSFS" 2>/dev/null
+        fi
 
         # wait for the module mount to settle, ksu_susfs may appear late
         sleep 2
         try=$((try + 1))
     done
 
-    [ -z "$KSU_SUSFS" ] && exit 0
+    if ! susfs_usable; then
+        echo "[hma] $KSU_SUSFS missing or lacks add_hidden_uid_from; per-target sync skipped" >&2
+        exit 0
+    fi
     [ -d "$SUSFS_DIR" ] || exit 0
 
     # only apply the lists when the sync is enabled in the manager app

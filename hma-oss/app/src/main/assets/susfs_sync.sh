@@ -17,44 +17,30 @@ TARGETS_FILE="$SUSFS_DIR/targets.txt"
 # ABK: see hmaoss.sh - uid hiding is global, so only the detector target gets it.
 UID_HIDE_TARGET="${UID_HIDE_TARGET:-com.chunqiunativecheck}"
 
-# Prefer our own standalone per-UID ksu_susfs copy FIRST. The KernelSU `ksud`
-# binary is a multi-call applet and re-creates /data/adb/ksu/bin/ksu_susfs as a
-# hard link to itself; that applet rejects the per-UID argument form
-# (add_sus_path <path> <uid>), which made the sync silently do nothing.
-KSU_SUSFS=
-for p in \
-    /data/adb/hma_susfs/bin/ksu_susfs \
-    /data/adb/modules/hma_oss_zygisk/susfs/ksu_susfs \
-    /data/adb/ksu/bin/ksu_susfs \
-    /data/adb/ap/bin/ksu_susfs \
-    /data/adb/magisk/ksu_susfs \
-    /data/adb/ksu/bin/susfs
-do
-    if [ -x "$p" ]; then
-        KSU_SUSFS="$p"
-        break
-    fi
-done
+# ABK: ONE hard-coded path. KernelSU's ksud re-links
+# /data/adb/ksu/bin/ksu_susfs to its multi-call applet, which rejects the
+# per-UID / per-target subcommands, and PATH lookup can hit that applet too.
+# Neither is ever used here: only the module's private copy.
+KSU_SUSFS=/data/adb/hma_susfs/bin/ksu_susfs
 
-if [ -z "$KSU_SUSFS" ]; then
-    KSU_SUSFS="$(command -v ksu_susfs 2>/dev/null)"
+if [ ! -x "$KSU_SUSFS" ]; then
+    _mod=/data/adb/modules/hma_oss_zygisk/susfs/ksu_susfs
+    if [ -f "$_mod" ]; then
+        mkdir -p /data/adb/hma_susfs/bin 2>/dev/null
+        cp -f "$_mod" "$KSU_SUSFS" 2>/dev/null
+        chmod 755 "$KSU_SUSFS" 2>/dev/null
+    fi
 fi
 
-if [ -z "$KSU_SUSFS" ]; then
-    echo "SUSFS_SYNC_ERROR: ksu_susfs is not available"
+if [ ! -x "$KSU_SUSFS" ]; then
+    echo "SUSFS_SYNC_ERROR: $KSU_SUSFS is missing (the ksud applet is not accepted)"
     exit 2
 fi
 
-# Self-test: the resolved tool MUST accept the per-UID argument form.
-_PROBE="/data/local/tmp/.hma_susfs_probe_$$"
-mkdir -p "$_PROBE" 2>/dev/null
-if [ -d "$_PROBE" ]; then
-    if ! "$KSU_SUSFS" add_sus_path "$_PROBE" 0 >/dev/null 2>&1; then
-        echo "SUSFS_SYNC_ERROR: $KSU_SUSFS does not support per-UID add_sus_path"
-        rmdir "$_PROBE" 2>/dev/null
-        exit 3
-    fi
-    rmdir "$_PROBE" 2>/dev/null
+# Self-test: the tool MUST expose the per-target subcommands.
+if ! "$KSU_SUSFS" 2>&1 | grep -q 'add_hidden_uid_from'; then
+    echo "SUSFS_SYNC_ERROR: $KSU_SUSFS does not support add_hidden_uid_from"
+    exit 3
 fi
 
 # ABK per-target helper: hide a path from ONE target uid only (kernel 'hide_from').
