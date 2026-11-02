@@ -101,13 +101,13 @@ add_sus_path() {
     _loop="$3"
 
     [ -z "$_path" ] && return 0
-    [ -e "$_path" ] || return 0
 
-    if [ "$_loop" = "1" ]; then
-        "$KSU_SUSFS" add_sus_path_loop "$_path" "$_uid" >/dev/null 2>&1
-    else
-        "$KSU_SUSFS" add_sus_path "$_path" "$_uid" >/dev/null 2>&1
-    fi
+    # ABK SUS_PATH_LOOP_MODE_ABK: every plain hide-list path goes through the
+    # loop variant; the kernel re-resolves and re-flags it on every app spawn,
+    # so an evicted inode or a re-created data dir keeps being hidden.  The
+    # loop form also accepts paths that do not exist yet.
+    "$KSU_SUSFS" add_sus_path_loop "$_path" "$_uid" >/dev/null 2>&1
+    return 0
 
     return 0
 }
