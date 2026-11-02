@@ -3,6 +3,46 @@
 本仓库包含 SUSFS per-target 隐藏的内核补丁、`ksu_susfs` CLI 构建，以及 HMA-OSS 设备侧同步脚本。
 条目按日期倒序，按「修复 / 新增 / 文档 / 构建」分类。
 
+## 2026-11-02
+
+### 新增
+
+- **隐藏列表全部改为路径驱动，不再依赖 inode。**
+  `sus_path` 是按 inode 记账的：inode 被回收、或 app 数据目录重建（卸载/重装/更新）后，
+  `AS_FLAGS_*` 会随 inode 消失，配置还在但隐藏失效——表现就是「刚同步好、过一会又复现」。
+  - `pkgs.txt` 里的包路径：`add_sus_path()` 辅助函数直接调用 `add_sus_path_loop`
+    （不再探测路径是否存在，loop 允许路径稍后才创建）；
+  - per-target 和额外路径：沿用 `add_sus_path_hide_from`，由配套内核补丁
+    `SUS_PATH_LOOP_MODE_ABK` 入队成 `mode 1`，同样在每次 app 启动时按路径重放；
+  - 逐 target 的 `add_hidden_uid_from` 不变。
+- **`<PKG>` 额外路径占位符现在真正生效。** 之前只遍历 `pkgs.txt`（per-target 模式下它是空的），
+  改成 `targets.txt` 第 2 列 ∪ `pkgs.txt` 去重后展开，并输出展开数量；无包可展开时给出
+  `SUSFS_SYNC_WARN`。
+
+### 修复
+
+- **`sync.sh` 以 CRLF 发布导致同步失败。** mksh 报
+  `sync.sh[N]: : inaccessible or not found` / `syntax error: unexpected 'newline'`，
+  同步退出码 1。新增 `.gitattributes`（`*.sh text eol=lf`）并把三个随包发布的脚本归一化为 LF。
+- **额外路径会把属主自己也隐藏。** 检测器既是被隐藏包、又是 target 时，
+  `/data/data/<检测器>` 会被 deny 给它自己，读不到自己的数据（表现为用户协议页闪退）。
+  展开时用 `stat -c %u <path>` 取路径属主，跳过 `target_uid == owner_uid`；
+  `sync_target_hides` 也加了 self-pair 保护。
+
+### 构建
+
+- **Gradle 仓库改为官方优先。** `google()` / `mavenCentral()` / `jitpack.io` 放最前，
+  阿里云、腾讯镜像降为 fallback。镜像偶发 502 会让 Gradle 把整个仓库禁用
+  （`Repository maven is disabled due to earlier error`），之前两次 APK 构建就是挂在
+  Aliyun 502 和 JitPack 的 `ZygoteLoader` 上。
+
+### 说明
+
+- 与 ABK 内核补丁的配套关系：
+  `SUS_PATH_LOOP_MODE_ABK`（loop 条目带 `mode`、`hide_from` 入队）、
+  `SUSFS_SUS_TYPE_REG_ABK`（BakaSU 的 SELinux type/AVD 注册）。
+- 下次同步上游 SUSFS 时的核对清单见 ABK 仓库 `docs/susfs-sync.md`。
+
 ## 2026-10-26
 
 ### 修复
