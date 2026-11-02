@@ -41,6 +41,13 @@
 - 与 ABK 内核补丁的配套关系：
   `SUS_PATH_LOOP_MODE_ABK`（loop 条目带 `mode`、`hide_from` 入队）、
   `SUSFS_SUS_TYPE_REG_ABK`（BakaSU 的 SELinux type/AVD 注册）。
+- **教训：FUSE 的 `i_ino` 是 0，per-uid 表会退化成通配符。**
+  `/storage/emulated/0` 是 FUSE，子项不实例化 inode，`i_ino` 为 0；
+  `add_sus_path_hide_from` 按 `(ino, dev, uid, mode)` 记账，于是 `ino 0` 条目会命中
+  **所有**未实例化的 FUSE inode——一个 app 只要同时是 target，就会读不到自己的
+  `/sdcard/Android/data/<pkg>`（原神表现为「资源下载失败」）。
+  内核侧已用 `patch_susfs_ino_zero_guard.py` 修掉（ABK `3f26140`）；
+  FUSE 路径的 per-target 隐藏因此不再生效，`/data/*` 不受影响。
 - 下次同步上游 SUSFS 时的核对清单见 ABK 仓库 `docs/susfs-sync.md`。
 
 ## 2026-10-26
