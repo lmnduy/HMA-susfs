@@ -161,7 +161,33 @@ hidden_pkgs() {
     } | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | grep -v '^#' | sort -u
 }
 
+# ABK EXTRA_PATH_SCOPE_ABK: an extra path must be hidden only from the apps
+# that are configured to hide things (targets.txt column 1), never from the
+# whole system: the hidden app keeps its own view and whitelisted apps keep a
+# complete view (A->B visible, C->B hidden).
+hidden_targets() {
+    [ -s "$SUSFS_DIR/targets.txt" ] && cut -f1 "$SUSFS_DIR/targets.txt" 2>/dev/null \
+        | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | grep -v '^#' | sort -u
+}
+
+apply_extra_path_for_targets() {
+    _path="$1"
+    _targets="$2"
+
+    [ -n "$_path" ] || return 0
+    [ -e "$_path" ] || return 0
+    [ -n "$_targets" ] || return 0
+
+    printf '%s\n' "$_targets" | while IFS= read -r _tpkg; do
+        [ -n "$_tpkg" ] || continue
+        _tuid="$(stat -c %u "/data/user/0/$_tpkg" 2>/dev/null)"
+        [ -n "$_tuid" ] || continue
+        "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_tuid" >/dev/null 2>&1 || true
+    done
+}
+
 if [ -s "$EXTRA_FILE" ]; then
+    _targets="$(hidden_targets)"
     while IFS= read -r _line; do
         case "$_line" in
             ""|"#"*) continue ;;
@@ -174,19 +200,16 @@ if [ -s "$EXTRA_FILE" ]; then
                     printf '%s\n' "$_pkg_list" | while IFS= read -r _pkg; do
                         [ -n "$_pkg" ] || continue
 
-                        _uid="$(stat -c %u "/data/user/0/$_pkg" 2>/dev/null)"
-                        [ -z "$_uid" ] && _uid="-1"
-
                         _expanded="$(printf '%s' "$_line" | sed "s|<PKG>|$_pkg|g")"
-                        add_sus_path "$_expanded" "$_uid" 0
+                        apply_extra_path_for_targets "$_expanded" "$_targets"
                     done
-                    echo "SUSFS_SYNC_INFO: expanded '$_line' over $(printf '%s\n' "$_pkg_list" | wc -l) hidden package(s)"
+                    echo "SUSFS_SYNC_INFO: expanded '$_line' over $(printf '%s\n' "$_pkg_list" | wc -l) hidden package(s), hidden from $(printf '%s\n' "$_targets" | wc -l) target(s)"
                 else
                     echo "SUSFS_SYNC_WARN: no hidden package to expand '$_line' with (targets.txt/pkgs.txt empty)"
                 fi
                 ;;
             *)
-                add_sus_path "$_line" "-1" 0
+                apply_extra_path_for_targets "$_line" "$_targets"
                 ;;
         esac
     done < "$EXTRA_FILE"
