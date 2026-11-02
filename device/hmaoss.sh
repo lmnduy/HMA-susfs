@@ -184,10 +184,14 @@ apply_extra_path_for_targets() {
     [ -e "$_path" ] || return 0
     [ -n "$_targets" ] || return 0
 
+    # ABK SELF_VIEW_ABK: never hide a path from the app that owns it
+    _owner_uid="$(stat -c %u "$_path" 2>/dev/null)"
+
     printf '%s\n' "$_targets" | while IFS= read -r _tpkg; do
         [ -n "$_tpkg" ] || continue
         _tuid="$(stat -c %u "/data/user/0/$_tpkg" 2>/dev/null)"
         [ -n "$_tuid" ] || continue
+        [ "$_tuid" = "$_owner_uid" ] && continue
         "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_tuid" >/dev/null 2>&1 || true
     done
 }

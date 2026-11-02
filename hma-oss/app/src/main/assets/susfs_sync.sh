@@ -75,6 +75,8 @@ sync_target_hides() {
         # ABK: per-target uid hiding - one private (hidden_uid, target_uid)
         # pair per line, so no other app's view is affected.
         _huid="$(stat -c %u "/data/user/0/$_hidden" 2>/dev/null)" || true
+        # ABK SELF_VIEW_TARGET_ABK: an app never hides its own paths from itself
+        [ -n "$_huid" ] && [ "$_tuid" = "$_huid" ] && continue
         if [ -n "$_huid" ] && [ -n "$_tuid" ]; then
             "$KSU_SUSFS" add_hidden_uid_from "$_huid" "$_tuid" >/dev/null 2>&1 || true
         fi
@@ -178,10 +180,17 @@ apply_extra_path_for_targets() {
     [ -e "$_path" ] || return 0
     [ -n "$_targets" ] || return 0
 
+    # ABK SELF_VIEW_ABK: never hide a path from the app that owns it - the
+    # detector is also a target (it hides other apps), so without this guard
+    # /data/data/<detector> gets denied for the detector itself and the app
+    # cannot read its own data (crashes on its onboarding screen).
+    _owner_uid="$(stat -c %u "$_path" 2>/dev/null)"
+
     printf '%s\n' "$_targets" | while IFS= read -r _tpkg; do
         [ -n "$_tpkg" ] || continue
         _tuid="$(stat -c %u "/data/user/0/$_tpkg" 2>/dev/null)"
         [ -n "$_tuid" ] || continue
+        [ "$_tuid" = "$_owner_uid" ] && continue
         "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_tuid" >/dev/null 2>&1 || true
     done
 }
