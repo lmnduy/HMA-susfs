@@ -150,6 +150,17 @@ if [ -s "$PKGS_FILE" ]; then
     done < "$PKGS_FILE"
 fi
 
+# ABK EXTRA_PKG_EXPAND_ABK: the "<PKG>" placeholder used to expand over
+# pkgs.txt only, but in HMA's per-target mode pkgs.txt stays empty (the hide
+# relations live in targets.txt as "<target>\t<hidden>"), so every
+# "/data/data/<PKG>" style extra path silently did nothing.
+hidden_pkgs() {
+    {
+        [ -s "$SUSFS_DIR/targets.txt" ] && cut -f2 "$SUSFS_DIR/targets.txt" 2>/dev/null
+        [ -s "$SUSFS_DIR/pkgs.txt" ] && cat "$SUSFS_DIR/pkgs.txt" 2>/dev/null
+    } | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | grep -v '^#' | sort -u
+}
+
 if [ -s "$EXTRA_FILE" ]; then
     while IFS= read -r _line; do
         case "$_line" in
@@ -158,18 +169,20 @@ if [ -s "$EXTRA_FILE" ]; then
 
         case "$_line" in
             *"<PKG>"*)
-                if [ -s "$PKGS_FILE" ]; then
-                    while IFS= read -r _pkg; do
-                        case "$_pkg" in
-                            ""|"#"*) continue ;;
-                        esac
+                _pkg_list="$(hidden_pkgs)"
+                if [ -n "$_pkg_list" ]; then
+                    printf '%s\n' "$_pkg_list" | while IFS= read -r _pkg; do
+                        [ -n "$_pkg" ] || continue
 
                         _uid="$(stat -c %u "/data/user/0/$_pkg" 2>/dev/null)"
                         [ -z "$_uid" ] && _uid="-1"
 
                         _expanded="$(printf '%s' "$_line" | sed "s|<PKG>|$_pkg|g")"
                         add_sus_path "$_expanded" "$_uid" 0
-                    done < "$PKGS_FILE"
+                    done
+                    echo "SUSFS_SYNC_INFO: expanded '$_line' over $(printf '%s\n' "$_pkg_list" | wc -l) hidden package(s)"
+                else
+                    echo "SUSFS_SYNC_WARN: no hidden package to expand '$_line' with (targets.txt/pkgs.txt empty)"
                 fi
                 ;;
             *)
