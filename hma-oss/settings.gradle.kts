@@ -4,29 +4,35 @@ enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {
     repositories {
-        // NOTE: mirrors are put first because dl.google.com is not reachable in this environment
+        // Official repositories first: the Aliyun/Tencent mirrors regularly
+        // answer 502, and a single 502 makes Gradle disable that repository
+        // for the rest of the build (see the HMA CI failures).
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven("https://jitpack.io")
+        // Fallbacks for networks that cannot reach the official hosts.
         maven("https://maven.aliyun.com/repository/google")
         maven("https://maven.aliyun.com/repository/public")
         maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public")
-        gradlePluginPortal()
-        google()
-        mavenCentral()
         mavenLocal()
-        maven("https://jitpack.io")
     }
 }
 
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        // NOTE: mirrors are put first because dl.google.com is not reachable in this environment
+        // Official repositories first: the Aliyun/Tencent mirrors regularly
+        // answer 502, and a single 502 makes Gradle disable that repository
+        // for the rest of the build (see the HMA CI failures).
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+        // Fallbacks for networks that cannot reach the official hosts.
         maven("https://maven.aliyun.com/repository/google")
         maven("https://maven.aliyun.com/repository/public")
         maven("https://mirrors.cloud.tencent.com/nexus/repository/maven-public")
-        google()
-        mavenCentral()
         mavenLocal()
-        maven("https://jitpack.io")
     }
 
     versionCatalogs {
