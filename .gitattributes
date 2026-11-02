@@ -1,0 +1,4 @@
+# Shell scripts are shipped verbatim into the APK assets and the Zygisk module
+# and executed by Android's /system/bin/sh.  A CRLF checkout makes mksh fail
+# with "inaccessible or not found" / "syntax error: unexpected 'newline'".
+*.sh text eol=lf
