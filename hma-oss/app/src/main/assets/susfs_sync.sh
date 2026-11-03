@@ -306,6 +306,8 @@ sort -u "$STATE_FILE" > "$STATE_FILE.sorted" 2>/dev/null
 APPLIED=0
 FAILED=0
 SKIPPED=0
+PRUNED=0
+OLD_TOTAL="$(wc -l < "$STATE_FILE" 2>/dev/null | tr -d ' ')"
 
 if [ -s "$DESIRED_FILE.sorted" ]; then
     comm -13 "$STATE_FILE.sorted" "$DESIRED_FILE.sorted" > "$DELTA_FILE" 2>/dev/null
@@ -335,15 +337,26 @@ if [ -s "$DESIRED_FILE.sorted" ]; then
         esac
     done < "$DELTA_FILE"
 
-    if [ "$APPLIED" -gt 0 ]; then
-        cat "$DELTA_FILE" >> "$STATE_FILE" 2>/dev/null
-        sort -u "$STATE_FILE" -o "$STATE_FILE" 2>/dev/null
+    # ABK PRUNE_ABK: the dictionary mirrors the configuration that produced this
+    # pass, so an entry whose config disappeared (app uninstalled, template
+    # removed, path deleted) is dropped here instead of lingering forever.
+    #
+    # The kernel keeps the already applied entries until the next reboot - SUSFS
+    # has no delete API - which is fine for an uninstalled package (its paths are
+    # gone) and is re-applied on demand if the config comes back.
+    PRUNED=$((OLD_TOTAL - SKIPPED))
+    cp -f "$DESIRED_FILE.sorted" "$STATE_FILE" 2>/dev/null
+else
+    # Nothing configured at all: keep the dictionary unless this was a reset.
+    if [ "$STATE_MODE" = "reset" ] && [ "$OLD_TOTAL" -gt 0 ]; then
+        PRUNED="$OLD_TOTAL"
+        : > "$STATE_FILE" 2>/dev/null
     fi
 fi
 
 TOTAL="$(wc -l < "$STATE_FILE" 2>/dev/null | tr -d ' ')"
 rm -f "$DESIRED_FILE" "$DESIRED_FILE.sorted" "$STATE_FILE.sorted" "$DELTA_FILE" \
-      "$JOINED_FILE" "$TARGET_NAMES" 2>/dev/null
+      "$JOINED_FILE" "$TARGET_NAMES" "$SUSFS_DIR/hidden_pkgs.tmp" 2>/dev/null
 
-echo "SUSFS_SYNC_OK: applied $APPLIED new, $SKIPPED unchanged, $FAILED failed, $TOTAL in dictionary ($STATE_MODE)"
+echo "SUSFS_SYNC_OK: applied $APPLIED new, $SKIPPED unchanged, $PRUNED pruned, $FAILED failed, $TOTAL in dictionary ($STATE_MODE)"
 exit 0
