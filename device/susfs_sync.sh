@@ -168,9 +168,9 @@ sync_target_hides() {
         emit_pair uid_from "$_huid" "$_tuid" 2>/dev/null
 
         if [ "$_mode" = "data" ]; then
-            _paths="/data/user/0/$_hidden /data/user_de/0/$_hidden /data/data/$_hidden /data_mirror/data_ce/null/$_hidden /data_mirror/data_de/null/$_hidden"
+            _paths="/data/user/0/$_hidden /data/user_de/0/$_hidden /data/data/$_hidden /data_mirror/data_ce/null/$_hidden /data_mirror/data_de/null/$_hidden /storage/emulated/0/Android/data/$_hidden /data/media/0/Android/data/$_hidden"
         else
-            _paths="/data/user/0/$_hidden /data/user_de/0/$_hidden /data/data/$_hidden /data_mirror/data_ce/null/$_hidden /data_mirror/data_de/null/$_hidden /data/app/*/$_hidden-* /data/app/*/$_hidden"
+            _paths="/data/user/0/$_hidden /data/user_de/0/$_hidden /data/data/$_hidden /data_mirror/data_ce/null/$_hidden /data_mirror/data_de/null/$_hidden /storage/emulated/0/Android/data/$_hidden /data/media/0/Android/data/$_hidden /data/app/*/$_hidden-* /data/app/*/$_hidden"
         fi
 
         for _p in $_paths
