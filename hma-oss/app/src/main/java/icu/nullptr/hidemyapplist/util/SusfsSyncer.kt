@@ -177,6 +177,39 @@ object SusfsSyncer {
         return SyncResult(output.contains(SUCCESS_MARKER), output.trim())
     }
 
+    /**
+     * ABK SCRIPT_DEPLOY_ABK: refresh the deployed script (and the enabled flag)
+     * without applying anything.
+     *
+     * The kernel tables are rebuilt by the boot script two minutes after boot,
+     * which runs whatever `sync.sh` happens to be on disk.  After an APK update
+     * that file is stale (it is only rewritten by a full sync), so the module
+     * kept executing the old logic and the new rules looked like they never took
+     * effect.  Deploying on every app start keeps the two in step.
+     */
+    fun deployScript(context: Context): Boolean {
+        val script = try {
+            context.assets.open(ASSET_NAME).bufferedReader().use { it.readText() }
+        } catch (throwable: Throwable) {
+            return false
+        }
+
+        val workDir = File(context.cacheDir, CACHE_DIR_NAME).apply { mkdirs() }
+        val scriptFile = File(workDir, "sync.sh").apply { writeText(script) }
+        val enabledFile = File(workDir, "enabled").apply {
+            writeText(if (ConfigManager.susfsSyncEnabled) "1\n" else "0\n")
+        }
+
+        val cmd = buildString {
+            append("mkdir -p '$SUSFS_DIR' && ")
+            append("cp '${scriptFile.absolutePath}' '$SCRIPT_FILE' && ")
+            append("cp '${enabledFile.absolutePath}' '$ENABLED_FILE' && ")
+            append("chmod 755 '$SCRIPT_FILE'")
+        }
+
+        return SuUtils.execPrivileged(cmd)
+    }
+
     private fun toFileContent(items: List<String>): String =
         if (items.isEmpty()) "" else items.joinToString("") { "$it\n" }
 }

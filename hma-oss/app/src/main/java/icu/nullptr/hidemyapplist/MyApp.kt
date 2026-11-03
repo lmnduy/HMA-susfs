@@ -8,6 +8,7 @@ import icu.nullptr.hidemyapplist.service.ConfigManager
 import icu.nullptr.hidemyapplist.service.PrefManager
 import icu.nullptr.hidemyapplist.service.ServiceClient
 import icu.nullptr.hidemyapplist.util.ConfigUtils.getLocale
+import icu.nullptr.hidemyapplist.util.SusfsSyncer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import java.util.Locale
@@ -44,6 +45,17 @@ class MyApp : Application() {
         hmaApp = this
         loadPreferences()
         AppChangeReceiver.register(this)
+
+        // ABK SCRIPT_DEPLOY_ABK: keep /data/adb/hma_susfs/sync.sh in step with
+        // the APK.  The boot pass runs whatever script is on disk, so after an
+        // update the module used to keep executing the previous logic.
+        Thread {
+            try {
+                SusfsSyncer.deployScript(applicationContext)
+            } catch (_: Throwable) {
+                // root not granted yet: the next sync will deploy it anyway
+            }
+        }.apply { isDaemon = true }.start()
 
         val handler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
