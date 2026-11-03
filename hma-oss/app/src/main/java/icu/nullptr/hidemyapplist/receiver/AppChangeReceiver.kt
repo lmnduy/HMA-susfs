@@ -5,10 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.util.Log
-import icu.nullptr.hidemyapplist.service.ConfigManager
 import icu.nullptr.hidemyapplist.service.ServiceClient
 import icu.nullptr.hidemyapplist.util.PackageHelper
-import icu.nullptr.hidemyapplist.util.SusfsSyncer
 
 class AppChangeReceiver : BroadcastReceiver() {
 
@@ -35,27 +33,14 @@ class AppChangeReceiver : BroadcastReceiver() {
             ServiceClient.log(Log.INFO, TAG, "Received intent: $intent")
             PackageHelper.invalidateCache()
 
-            // ABK PACKAGE_EVENT_SYNC_ABK: keep the sus_path runtime dictionary in
-            // step with installs / uninstalls / updates.  The sync only appends
-            // the pairs that are missing from the dictionary, so this is cheap;
-            // it is skipped entirely when the SUSFS sync is disabled.
-            if (ConfigManager.susfsSyncEnabled) {
-                val appContext = context.applicationContext
-                Thread {
-                    try {
-                        val result = SusfsSyncer.sync(appContext)
-                        ServiceClient.log(
-                            Log.INFO, TAG,
-                            "sus_path sync after package event: success=${result.success}"
-                        )
-                    } catch (throwable: Throwable) {
-                        ServiceClient.log(
-                            Log.WARN, TAG,
-                            "sus_path sync after package event failed: ${throwable.message}"
-                        )
-                    }
-                }.apply { isDaemon = true }.start()
-            }
+            // ABK PACKAGE_EVENT_ABK: nothing else here on purpose.
+            //
+            // The sus_path tables are reconciled by an explicit sync and by the
+            // boot pass (two minutes after boot) - that is enough and it keeps
+            // the cost predictable.  A sync triggered here would not even run on
+            // MIUI/HyperOS: the ROM rejects ACTION_PACKAGE_ADDED for third party
+            // apps ("MIUILOG- Reject ACTION_PACKAGE_ADDED dispatch to ..."), and a
+            // manifest receiver is blocked the same way.
         }
     }
 }
