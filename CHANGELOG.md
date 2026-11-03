@@ -3,6 +3,32 @@
 本仓库包含 SUSFS per-target 隐藏的内核补丁、`ksu_susfs` CLI 构建，以及 HMA-OSS 设备侧同步脚本。
 条目按日期倒序，按「修复 / 新增 / 文档 / 构建」分类。
 
+## 2026-11-03
+
+### 修复
+
+- **白名单模板里的应用现在对所有应用可见（模块侧）。**
+  `HMAService.shouldHide()` 只认「调用方自己应用的模板」，白名单模式下没被列到的包一律隐藏；
+  而 `excludeSystemApps` 的豁免按 `FLAG_SYSTEM` 判断，像讯飞输入法这种装在
+  `/product/data-app` 的 **product 预装应用没有 system flag**，于是被隐式隐藏
+  → Maple 交叉核对「当前输入法」与「包查询结果」时报 `component_invisible: 1`。
+  现在缓存「所有白名单模板 appList 的并集」，在隐式隐藏前先返回可见（配置重载时失效缓存）。
+  这是磁盘层 `ConfigManager.getSusfsTargetHides()` 同名改动的 API 侧对应实现。
+- **刷完新 APK 后实际跑的还是旧脚本。**
+  `/data/adb/hma_susfs/sync.sh` 只在「完整同步」时由 App 写入，开机脚本跑的是磁盘上的旧版本，
+  新逻辑看起来完全没生效。新增 `SusfsSyncer.deployScript()`，`MyApp.onCreate` 每次启动刷新脚本。
+- **去掉安装/卸载广播同步。** MIUI/HyperOS 直接拒绝把 `ACTION_PACKAGE_ADDED` 派发给第三方应用
+  （`MIUILOG- Reject ACTION_PACKAGE_ADDED dispatch to ...`），manifest 声明同样被拦；
+  同步改为「手动同步 + 开机后 120s 一次」，行为可预期。
+
+### 新增
+
+- **字典支持清除（prune）。** 每次同步结束后把 `state.tsv` 重写为本次配置算出的 desired 集合：
+  配置里消失的条目（应用卸载、模板删除）会被统计为 `pruned` 并从字典移除；
+  内核里已下发的条目不追溯（SUSFS 无删除接口），卸载场景无影响，配置回退需重启才恢复可见。
+- **两阶段同步。** 先用一次 `stat` + awk join 建「包名→uid」映射并生成 desired 列表，再 `sort`/`comm`
+  求差集，只对差集调用 `ksu_susfs`；无变化同步从 **2m26s 降到 3.4s**，全量 `--reset` 约 1m35s（CLI 开销）。
+
 ## 2026-11-02
 
 ### 新增
