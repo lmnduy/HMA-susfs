@@ -195,9 +195,25 @@ object ConfigManager {
     ): Map<String, Set<String>> {
         val result = LinkedHashMap<String, Set<String>>()
 
+        // ABK GLOBAL_WHITELIST_ABK: a package listed in ANY whitelist template is
+        // visible to every app, not only to the targets that happen to apply that
+        // template.  Without this a preinstalled IME (it lives in
+        // /product/data-app, so it has no SYSTEM flag) got hidden from any target
+        // whose own template did not list it, and the detectors flagged the
+        // mismatch between "current IME" and "package not visible".
+        val globalWhitelist = mutableSetOf<String>().apply {
+            config.templates.values.forEach { template ->
+                if (template.isWhitelist) addAll(template.appList)
+            }
+        }
+
         config.scope.forEach { (target, cfg) ->
             val visible = mutableSetOf<String>()
             val hidden = mutableSetOf<String>()
+
+            // 白名单里的应用对所有人可见；自己永远可见、绝不被隐藏。
+            visible.addAll(globalWhitelist)
+            visible.add(target)
 
             cfg.applyTemplates.forEach { name ->
                 val template = config.templates[name] ?: return@forEach
