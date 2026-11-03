@@ -43,6 +43,67 @@ if ! "$KSU_SUSFS" 2>&1 | grep -q 'add_hidden_uid_from'; then
     exit 3
 fi
 
+# ABK STATE_DICT_ABK: the runtime dictionary of what is already applied.
+#
+# A sync APPENDS only the newly configured (uid, path) pairs instead of
+# re-sending the whole list, because the kernel keeps every entry until reboot
+# and re-applying thousands of pairs costs time.  The file is a plain
+# dictionary, one "<uid>|<path>" line each.
+#
+#   --reset   drop the dictionary and apply everything again (used on boot,
+#             where the kernel has forgotten all entries)
+#   (default) append only what is missing
+STATE_FILE="$SUSFS_DIR/state.tsv"
+STATE_MODE="append"
+case "${1:-}" in
+    --reset) STATE_MODE="reset" ;;
+esac
+[ "${SUSFS_STATE_RESET:-0}" = "1" ] && STATE_MODE="reset"
+
+mkdir -p "$SUSFS_DIR" 2>/dev/null
+[ "$STATE_MODE" = "reset" ] && : > "$STATE_FILE" 2>/dev/null
+[ -f "$STATE_FILE" ] || : > "$STATE_FILE" 2>/dev/null
+STATE_BLOB="$(cat "$STATE_FILE" 2>/dev/null)"
+STATE_SKIPPED=0
+
+# The lookup runs in-process over the whole dictionary (no fork per pair), so a
+# full pass over a few thousand entries stays fast.
+state_has() {
+    case "$STATE_BLOB" in
+        *"
+$1"*) return 0 ;;
+    esac
+    return 1
+}
+
+state_add() {
+    printf '%s\n' "$1" >> "$STATE_FILE" 2>/dev/null
+    STATE_BLOB="$STATE_BLOB
+$1"
+}
+
+# ABK: apply one (uid, path) pair unless the dictionary already has it.
+susfs_apply_once() {
+    _mode="$1"
+    _path="$2"
+    _uid="$3"
+    _key="$_mode|$_uid|$_path"
+
+    if state_has "$_key"; then
+        STATE_SKIPPED=$((STATE_SKIPPED + 1))
+        return 0
+    fi
+
+    if [ "$_mode" = "hide_from" ]; then
+        "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1 || return 1
+    else
+        "$KSU_SUSFS" add_sus_path_loop "$_path" "$_uid" >/dev/null 2>&1 || return 1
+    fi
+
+    state_add "$_key"
+    return 0
+}
+
 # ABK per-target helper: hide a path from ONE target uid only (kernel 'hide_from').
 add_hide_from() {
     _path="$1"
@@ -51,7 +112,7 @@ add_hide_from() {
     [ -z "$_path" ] && return 0
     [ -e "$_path" ] || return 0
 
-    "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1
+    susfs_apply_once hide_from "$_path" "$_uid"
     return 0
 }
 
@@ -106,9 +167,7 @@ add_sus_path() {
     # loop variant; the kernel re-resolves and re-flags it on every app spawn,
     # so an evicted inode or a re-created data dir keeps being hidden.  The
     # loop form also accepts paths that do not exist yet.
-    "$KSU_SUSFS" add_sus_path_loop "$_path" "$_uid" >/dev/null 2>&1
-    return 0
-
+    susfs_apply_once loop "$_path" "$_uid"
     return 0
 }
 
@@ -191,7 +250,7 @@ apply_extra_path_for_targets() {
         _tuid="$(stat -c %u "/data/user/0/$_tpkg" 2>/dev/null)"
         [ -n "$_tuid" ] || continue
         [ "$_tuid" = "$_owner_uid" ] && continue
-        "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_tuid" >/dev/null 2>&1 || true
+        susfs_apply_once hide_from "$_path" "$_tuid" || true
     done
 }
 
@@ -233,5 +292,5 @@ else
 fi
 rmdir /data/local/tmp/.hma_hf_probe 2>/dev/null
 
-echo "SUSFS_SYNC_OK"
+echo "SUSFS_SYNC_OK: applied $(wc -l < "$STATE_FILE" 2>/dev/null | tr -d ' ') pair(s), skipped $STATE_SKIPPED already applied ($STATE_MODE)"
 exit 0

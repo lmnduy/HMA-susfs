@@ -37,7 +37,10 @@ set -e
 cp "$MODDIR/module.prop.bak" "$MODDIR/module.prop"
 
 (
-    sleep 5
+    # ABK BOOT_DELAY_ABK: do not touch the sus_path tables while the system is
+    # still booting - it delays the boot and the per-app data dirs are not
+    # resolvable yet.  One full pass two minutes after boot is enough.
+    sleep 120
 
     try=1
     while [ "$try" -le 10 ]; do
@@ -286,11 +289,6 @@ if [ -s "$EXTRA_FILE" ]; then
 
     mkdir -p /data/local/tmp/.hma_hf_probe 2>/dev/null
     if [ -n "$KSU_SUSFS" ] && "$KSU_SUSFS" add_sus_path_hide_from /data/local/tmp/.hma_hf_probe 0 >/dev/null 2>&1; then
-        sync_target_hides
-        # ABK: at boot-completed the per-app data dirs are not always
-        # resolvable yet, so targets listed late (the detector) were skipped.
-        # A second pass after the system settles makes the table complete.
-        sleep 30
         sync_target_hides
     fi
     rmdir /data/local/tmp/.hma_hf_probe 2>/dev/null
