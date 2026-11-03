@@ -7,6 +7,15 @@
 
 ### 修复
 
+- **撤掉「风险应用全局隐藏」。**
+  中午那版把「不在任何白名单模板、也没有应用模板」的用户应用用
+  `add_sus_path_loop <path> <owner_uid>` 对**所有 app** 隐藏；春秋随即在自己的包清单里看到这些包、
+  但它们的 `/data/data` 目录消失，于是报「隐藏应用列表生效」。
+  磁盘层必须与 `ConfigManager.getSusfsTargetHides()` 的视角一致：只对配置了隐藏的 target 隐藏，
+  绝不做全局隐藏。`buildPkgsList()` 改回 `emptyList()`。
+- **恢复 per-target 的两条外部路径**（`/storage/emulated/0/Android/data/<pkg>`、
+  `/data/media/0/Android/data/<pkg>`），与中午之前的脚本保持一致（FUSE 上受 ino-0 守卫限制，但保留无副作用）。
+
 - **白名单模板里的应用现在对所有应用可见（模块侧）。**
   `HMAService.shouldHide()` 只认「调用方自己应用的模板」，白名单模式下没被列到的包一律隐藏；
   而 `excludeSystemApps` 的豁免按 `FLAG_SYSTEM` 判断，像讯飞输入法这种装在
