@@ -237,9 +237,31 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
         if (config != loading) {
             loading.cleanRemnantsFromConfig()
             config = loading
+            globalWhitelistCache = null // ABK GLOBAL_WHITELIST_ABK
         }
 
         logI(TAG) { "Config loaded" }
+    }
+
+    // ABK GLOBAL_WHITELIST_ABK: the union of every whitelist template appList.
+    //
+    // A package listed in ANY whitelist template is visible to every app.  The
+    // preinstalled IME (com.iflytek.inputmethod.miui) lives in /product/data-app
+    // and therefore carries no SYSTEM flag, so the "excludeSystemApps" shortcut
+    // below never protected it: every whitelist-mode target answered "hidden"
+    // for it while the system still reported it as the current IME, which is
+    // exactly the mismatch the detectors flag.
+    private var globalWhitelistCache: Set<String>? = null
+
+    private fun globalWhitelist(): Set<String> {
+        globalWhitelistCache?.let { return it }
+
+        val whitelist = mutableSetOf<String>()
+        config.templates.values.forEach { template ->
+            if (template.isWhitelist) whitelist.addAll(template.appList)
+        }
+        globalWhitelistCache = whitelist
+        return whitelist
     }
 
     private fun loadFilterCount() {
@@ -420,6 +442,10 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
                 return !appConfig.useWhitelist
             }
         }
+
+        // ABK GLOBAL_WHITELIST_ABK: the global whitelist wins over the implicit
+        // "hide everything else" fallback below.
+        if (query in globalWhitelist()) return false
 
         if (query !in config.ignoredPackagesForPresets) {
             for (presetName in appConfig.applyPresets) {
