@@ -57,22 +57,41 @@ object SusfsSyncer {
     data class SyncResult(val success: Boolean, val message: String)
 
     /**
-     * ABK: the legacy flat "global hide" list is DEPRECATED.
+     * ABK RISK_APPS_ABK: the "risk" packages.
      *
-     * It used to hold "the packages whose paths are hidden from everyone", which
-     * cannot express per-target hiding and used to be auto filled with the wrong
-     * set. Per-target hiding ([buildTargetsList]) replaces it, so nothing is
-     * written here any more.
-     */
-    /**
-     * ABK: GLOBAL hiding is disabled by design.
+     * A package is a risk package when the user installed it, it is NOT listed in
+     * any whitelist template and it has no app template of its own: nothing ever
+     * declared it visible, so it is exactly the set that has to disappear from
+     * the other apps' view (a detector that hides itself looks like this).
      *
-     * Hiding a package's /data/app from every process breaks that app (launcher
-     * icon degrades, the app cannot read its own APK). Only per-target hiding
-     * ([buildTargetsList]) is used: a configured target app must answer "not
-     * exist" for the hidden packages, while everything else keeps the truth.
+     * Their paths are applied with `add_sus_path_loop <path> <owner_uid>`, i.e.
+     * visible to the owning uid only: the app itself keeps working, every other
+     * app loses sight of it.  Preinstalled apps (system/product/vendor/cust/apex)
+     * and the packages that own scope entries are never touched - hiding those
+     * breaks launcher icons and the IME visibility the detectors cross-check.
      */
-    fun buildPkgsList(): List<String> = emptyList()
+    fun buildPkgsList(): List<String> {
+        val cache = PackageHelper.packageCache.replayCache.lastOrNull().orEmpty()
+        if (cache.isEmpty()) return emptyList()
+
+        val whitelist = ConfigManager.globalWhitelistPackages
+        val scoped = ConfigManager.scopedPackages
+        val preinstalledPrefixes = listOf(
+            "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
+        )
+
+        return cache.entries.asSequence()
+            .filter { (pkg, entry) ->
+                val appInfo = entry.info.applicationInfo ?: return@filter false
+                if (appInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0) return@filter false
+                val sourceDir = appInfo.sourceDir ?: return@filter false
+                if (preinstalledPrefixes.any { sourceDir.startsWith(it) }) return@filter false
+                pkg !in whitelist && pkg !in scoped
+            }
+            .map { it.key }
+            .sorted()
+            .toList()
+    }
 
     fun buildExtraPathsList(): List<String> =
         ConfigManager.susfsExtraPaths.map { it.trim() }.filter { it.isNotEmpty() }.distinct()

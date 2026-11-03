@@ -169,6 +169,25 @@ object ConfigManager {
     }
 
     /**
+     * ABK GLOBAL_WHITELIST_ABK: the union of every whitelist template appList.
+     *
+     * A package listed here is visible to every app: a preinstalled IME lives in
+     * /product/data-app and therefore carries no SYSTEM flag, so it used to be
+     * hidden from every target whose own template did not list it and the
+     * detectors flagged the mismatch between "current IME" and "package hidden".
+     */
+    val globalWhitelistPackages: Set<String>
+        get() = mutableSetOf<String>().apply {
+            config.templates.values.forEach { template ->
+                if (template.isWhitelist) addAll(template.appList)
+            }
+        }
+
+    /** ABK: packages that have an app template configured in [config.scope]. */
+    val scopedPackages: Set<String>
+        get() = config.scope.keys
+
+    /**
      * ABK: per-target hidden package map for the SUSFS path (disk) layer.
      *
      * HMA-OSS hides apps FROM a target app, so the disk layer must hide, for each
@@ -185,7 +204,8 @@ object ConfigManager {
      *     else is hidden (system apps only when excludeSystemApps is false), plus
      *     extraOppositeAppList and every BLACKLIST template appList.
      *
-     * In both modes the target itself and the visible packages are never hidden.
+     * In both modes the global whitelist and the target itself are always
+     * visible, and the target never hides itself.
      *
      * @return target package name -> packages that must be invisible to it
      */
@@ -197,15 +217,8 @@ object ConfigManager {
 
         // ABK GLOBAL_WHITELIST_ABK: a package listed in ANY whitelist template is
         // visible to every app, not only to the targets that happen to apply that
-        // template.  Without this a preinstalled IME (it lives in
-        // /product/data-app, so it has no SYSTEM flag) got hidden from any target
-        // whose own template did not list it, and the detectors flagged the
-        // mismatch between "current IME" and "package not visible".
-        val globalWhitelist = mutableSetOf<String>().apply {
-            config.templates.values.forEach { template ->
-                if (template.isWhitelist) addAll(template.appList)
-            }
-        }
+        // template.
+        val globalWhitelist = globalWhitelistPackages
 
         config.scope.forEach { (target, cfg) ->
             val visible = mutableSetOf<String>()
