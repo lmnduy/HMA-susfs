@@ -264,6 +264,25 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
         return whitelist
     }
 
+    // ABK PREINSTALLED_VISIBLE_ABK: installed on a read-only system partition.
+    private val preinstalledCache = mutableMapOf<String, Boolean>()
+
+    private val preinstalledPrefixes = arrayOf(
+        "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
+    )
+
+    private fun isPreinstalled(packageName: String): Boolean {
+        preinstalledCache[packageName]?.let { return it }
+
+        val sourceDir = runCatching {
+            pms.getPackageInfoCompat(packageName, 0L, 0)?.applicationInfo?.sourceDir
+        }.getOrNull()
+
+        val result = sourceDir != null && preinstalledPrefixes.any { sourceDir.startsWith(it) }
+        preinstalledCache[packageName] = result
+        return result
+    }
+
     private fun loadFilterCount() {
         if (!filterCountFile.exists()) {
             logI(TAG) { "Filter count file not found" }
@@ -439,21 +458,23 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             if (query in tpl.appList) {
                 if (isAppInGMSIgnoredPackages(caller, query)) return false
 
-                // ABK TEMPLATE_KIND_ABK: the verdict depends on the KIND of the
-                // template, not on the caller mode.  A whitelist template lists
-                // apps that stay visible, a blacklist template lists apps that
-                // must be hidden.  Returning "!useWhitelist" for both made a
-                // whitelist-mode caller treat blacklist-template entries as
-                // visible, while the disk layer (ConfigManager) hides them - the
-                // exact API/disk disagreement that surfaces as "hidden list
-                // active" in the detectors.
-                return !tpl.isWhitelist
+                return !appConfig.useWhitelist
             }
         }
 
         // ABK GLOBAL_WHITELIST_ABK: the global whitelist wins over the implicit
         // "hide everything else" fallback below.
         if (query in globalWhitelist()) return false
+
+        // ABK PREINSTALLED_VISIBLE_ABK: a preinstalled package is never hidden.
+        //
+        // Product/apex builds (the MIUI IME lives in /product/data-app) carry no
+        // SYSTEM flag, so the excludeSystemApps shortcut below never protected
+        // them: the detectors cross-check "current IME" against the package
+        // inventory and flagged the mismatch.  Exempting *all* preinstalled
+        // packages (and doing the same in the disk layer, see
+        // ConfigManager.getSusfsTargetHides) keeps both views identical.
+        if (isPreinstalled(query)) return false
 
         if (query !in config.ignoredPackagesForPresets) {
             for (presetName in appConfig.applyPresets) {

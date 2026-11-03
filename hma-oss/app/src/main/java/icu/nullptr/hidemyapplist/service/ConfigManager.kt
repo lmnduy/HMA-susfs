@@ -212,6 +212,7 @@ object ConfigManager {
     fun getSusfsTargetHides(
         userPackages: Set<String>,
         systemPackages: Set<String>,
+        preinstalledPackages: Set<String> = emptySet(),
     ): Map<String, Set<String>> {
         val result = LinkedHashMap<String, Set<String>>()
 
@@ -219,6 +220,17 @@ object ConfigManager {
         // visible to every app, not only to the targets that happen to apply that
         // template.
         val globalWhitelist = globalWhitelistPackages
+
+        // ABK PREINSTALLED_VISIBLE_ABK: preinstalled packages are never hidden.
+        //
+        // Product/apex builds carry no SYSTEM flag, so they land in userPackages
+        // and used to be hidden here while the API layer (HMAService.shouldHide,
+        // same exemption added there) reported them visible - the detectors
+        // cross-check both views and flag the difference.
+        val poolExcluded = mutableSetOf<String>().apply {
+            addAll(preinstalledPackages)
+            addAll(globalWhitelist)
+        }
 
         config.scope.forEach { (target, cfg) ->
             val visible = mutableSetOf<String>()
@@ -237,6 +249,7 @@ object ConfigManager {
             val hidingPool = mutableSetOf<String>().apply {
                 addAll(userPackages)
                 if (!cfg.excludeSystemApps) addAll(systemPackages)
+                removeAll(poolExcluded)
             }
 
             if (cfg.useWhitelist) {

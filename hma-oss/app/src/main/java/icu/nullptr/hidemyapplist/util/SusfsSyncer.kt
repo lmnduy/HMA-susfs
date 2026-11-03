@@ -85,16 +85,30 @@ object SusfsSyncer {
 
         val userPackages = mutableSetOf<String>()
         val systemPackages = mutableSetOf<String>()
+        // ABK PREINSTALLED_VISIBLE_ABK: read-only system partitions; these carry
+        // no SYSTEM flag when they are product/apex builds (the MIUI IME), so they
+        // must be collected separately and never hidden.
+        val preinstalledPrefixes = listOf(
+            "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
+        )
+        val preinstalledPackages = mutableSetOf<String>()
 
         cache.forEach { (pkg, entry) ->
-            val flags = entry.info.applicationInfo?.flags ?: 0
+            val appInfo = entry.info.applicationInfo
+            val flags = appInfo?.flags ?: 0
             if (flags and ApplicationInfo.FLAG_SYSTEM != 0) systemPackages.add(pkg)
             else userPackages.add(pkg)
+
+            val sourceDir = appInfo?.sourceDir
+            if (sourceDir != null && preinstalledPrefixes.any { sourceDir.startsWith(it) }) {
+                preinstalledPackages.add(pkg)
+            }
         }
 
         val installed = userPackages + systemPackages
         val lines = mutableListOf<String>()
-        ConfigManager.getSusfsTargetHides(userPackages, systemPackages).forEach { (target, hidden) ->
+        ConfigManager.getSusfsTargetHides(userPackages, systemPackages, preinstalledPackages)
+            .forEach { (target, hidden) ->
             // Only installed apps can be targeted; the config may reference apps
             // that are not on this device, and the root script would waste a
             // stat() per line on them (and used to time out).
