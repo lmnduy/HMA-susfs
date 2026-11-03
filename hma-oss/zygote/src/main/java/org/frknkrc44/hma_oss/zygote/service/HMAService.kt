@@ -438,7 +438,36 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
 
         if (appConfig.useWhitelist && appConfig.excludeSystemApps && query in systemApps) return false
 
+        // ABK PREINSTALLED_VISIBLE_ABK: a preinstalled package is never hidden.
+        //
+        // The MIUI IME lives in /product/data-app and therefore carries no SYSTEM
+        // flag, so the excludeSystemApps shortcut above never protected it: the
+        // detectors cross-check "current IME" against the package inventory and
+        // reported component_invisible.  Exempting every preinstalled package
+        // keeps this layer in step with the disk layer, which applies the same
+        // rule in ConfigManager.getSusfsTargetHides().
+        if (isPreinstalled(query)) return false
+
         return appConfig.useWhitelist
+    }
+
+    // ABK PREINSTALLED_VISIBLE_ABK: installed on a read-only system partition.
+    private val preinstalledCache = mutableMapOf<String, Boolean>()
+
+    private val preinstalledPrefixes = arrayOf(
+        "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
+    )
+
+    private fun isPreinstalled(packageName: String): Boolean {
+        preinstalledCache[packageName]?.let { return it }
+
+        val sourceDir = runCatching {
+            pms.getPackageInfoCompat(packageName, 0L, 0)?.applicationInfo?.sourceDir
+        }.getOrNull()
+
+        val result = sourceDir != null && preinstalledPrefixes.any { sourceDir.startsWith(it) }
+        preinstalledCache[packageName] = result
+        return result
     }
 
     fun getRestrictedZygotePermissions(caller: String?) =

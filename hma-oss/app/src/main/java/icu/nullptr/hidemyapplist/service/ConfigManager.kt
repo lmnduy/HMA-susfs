@@ -192,6 +192,7 @@ object ConfigManager {
     fun getSusfsTargetHides(
         userPackages: Set<String>,
         systemPackages: Set<String>,
+        preinstalledPackages: Set<String> = emptySet(),
     ): Map<String, Set<String>> {
         val result = LinkedHashMap<String, Set<String>>()
 
@@ -208,6 +209,11 @@ object ConfigManager {
             val hidingPool = mutableSetOf<String>().apply {
                 addAll(userPackages)
                 if (!cfg.excludeSystemApps) addAll(systemPackages)
+                // ABK PREINSTALLED_VISIBLE_ABK: product/apex builds carry no
+                // SYSTEM flag and used to be hidden here while the API layer
+                // (HMAService.shouldHide, same exemption) showed them - the
+                // detectors cross-check both views and flag the difference.
+                removeAll(preinstalledPackages)
             }
 
             if (cfg.useWhitelist) {
