@@ -439,7 +439,15 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             if (query in tpl.appList) {
                 if (isAppInGMSIgnoredPackages(caller, query)) return false
 
-                return !appConfig.useWhitelist
+                // ABK TEMPLATE_KIND_ABK: the verdict depends on the KIND of the
+                // template, not on the caller mode.  A whitelist template lists
+                // apps that stay visible, a blacklist template lists apps that
+                // must be hidden.  Returning "!useWhitelist" for both made a
+                // whitelist-mode caller treat blacklist-template entries as
+                // visible, while the disk layer (ConfigManager) hides them - the
+                // exact API/disk disagreement that surfaces as "hidden list
+                // active" in the detectors.
+                return !tpl.isWhitelist
             }
         }
 
