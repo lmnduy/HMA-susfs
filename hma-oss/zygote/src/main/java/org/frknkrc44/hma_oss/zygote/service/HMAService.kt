@@ -294,6 +294,21 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
                 it, 0L, 0)?.applicationInfo?.isSystemApp() ?: false
         }
 
+        // ABK PREINSTALLED_VISIBLE_ABK: build the preinstalled set here, once.
+        //
+        // It must NOT be computed inside shouldHide(): that runs while a
+        // PackageManager call is already being intercepted, so asking pms again
+        // re-enters the hook and blocks the caller (Maple froze at 25%, Duck
+        // Detector never left its splash screen).
+        pms.allPackages.forEach { pkg ->
+            val sourceDir = runCatching {
+                pms.getPackageInfoCompat(pkg, 0L, 0)?.applicationInfo?.sourceDir
+            }.getOrNull()
+            if (sourceDir != null && preinstalledPrefixes.any { sourceDir.startsWith(it) }) {
+                preinstalledApps.add(pkg)
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             frameworkHooks.add(PmsHookTarget34())
             frameworkHooks.add(InstallerHookTarget34())
@@ -446,29 +461,18 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
         // reported component_invisible.  Exempting every preinstalled package
         // keeps this layer in step with the disk layer, which applies the same
         // rule in ConfigManager.getSusfsTargetHides().
-        if (isPreinstalled(query)) return false
+        if (query in preinstalledApps) return false
 
         return appConfig.useWhitelist
     }
 
-    // ABK PREINSTALLED_VISIBLE_ABK: installed on a read-only system partition.
-    private val preinstalledCache = mutableMapOf<String, Boolean>()
+    // ABK PREINSTALLED_VISIBLE_ABK: read-only system partitions, filled once in
+    // installHooks() - see the comment there.
+    private val preinstalledApps = mutableSetOf<String>()
 
     private val preinstalledPrefixes = arrayOf(
         "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
     )
-
-    private fun isPreinstalled(packageName: String): Boolean {
-        preinstalledCache[packageName]?.let { return it }
-
-        val sourceDir = runCatching {
-            pms.getPackageInfoCompat(packageName, 0L, 0)?.applicationInfo?.sourceDir
-        }.getOrNull()
-
-        val result = sourceDir != null && preinstalledPrefixes.any { sourceDir.startsWith(it) }
-        preinstalledCache[packageName] = result
-        return result
-    }
 
     fun getRestrictedZygotePermissions(caller: String?) =
         config.scope[caller]?.restrictedZygotePermissions
