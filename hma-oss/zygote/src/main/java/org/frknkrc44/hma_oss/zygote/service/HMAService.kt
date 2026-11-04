@@ -94,6 +94,18 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
     private val configLock = Any()
     private val loggerLock = Any()
     val systemApps = mutableSetOf<String>()
+
+    // ABK PREINSTALLED_VISIBLE_ABK: read-only system partitions.
+    //
+    // Declared here, BEFORE init{}, because installHooks() runs from init and
+    // fills the set: a property declared further down would still be null at
+    // that point and blow up the whole hook installation (which is exactly how
+    // the first version ended up with no hiding at all).
+    private val preinstalledApps = mutableSetOf<String>()
+    private val preinstalledPrefixes = arrayOf(
+        "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
+    )
+
     private val frameworkHooks = mutableSetOf<IFrameworkHook>()
     internal var appUid = 0
         private set
@@ -466,13 +478,7 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
         return appConfig.useWhitelist
     }
 
-    // ABK PREINSTALLED_VISIBLE_ABK: read-only system partitions, filled once in
-    // installHooks() - see the comment there.
-    private val preinstalledApps = mutableSetOf<String>()
 
-    private val preinstalledPrefixes = arrayOf(
-        "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
-    )
 
     fun getRestrictedZygotePermissions(caller: String?) =
         config.scope[caller]?.restrictedZygotePermissions
