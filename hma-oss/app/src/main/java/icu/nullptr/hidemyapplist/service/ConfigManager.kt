@@ -202,9 +202,19 @@ object ConfigManager {
         val result = LinkedHashMap<String, Set<String>>()
 
         config.scope.forEach { (target, cfg) ->
-            // ABK WEBVIEW_EXEMPT_ABK: packages the API layer never hides (current
-            // WebView provider / default browser while webViewProtection is on).
-            val visible = mutableSetOf<String>().apply { addAll(alwaysVisible) }
+            // ABK GLOBAL_WHITELIST_ABK: every package listed by a whitelist
+            // template is visible for every target, even when the target applies
+            // no template at all (a whitelist-mode detector such as 春秋 must see
+            // the normal apps, otherwise "passing" the check means nothing).
+            //
+            // ABK WEBVIEW_EXEMPT_ABK: plus the packages the API layer never hides
+            // (WebView provider / default browser while webViewProtection is on).
+            val visible = mutableSetOf<String>().apply {
+                addAll(alwaysVisible)
+                config.templates.values
+                    .filter { it.isWhitelist }
+                    .forEach { addAll(it.appList) }
+            }
             val hidden = mutableSetOf<String>()
 
             cfg.applyTemplates.forEach { name ->

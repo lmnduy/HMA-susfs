@@ -102,6 +102,15 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
     // that point and blow up the whole hook installation (which is exactly how
     // the first version ended up with no hiding at all).
     private val preinstalledApps = mutableSetOf<String>()
+
+    // ABK GLOBAL_WHITELIST_ABK: every package that any whitelist template lists.
+    //
+    // A whitelist-mode target that applies no template (春秋 is exactly this) used
+    // to see nothing but itself, which is the opposite of what these checks are
+    // for: the detector must see the normal apps and only the non-whitelisted
+    // (root managers, hiders, other detectors) must stay hidden.
+    @Volatile
+    private var globalWhitelist: Set<String> = emptySet()
     private val preinstalledPrefixes = arrayOf(
         "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
     )
@@ -250,6 +259,10 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
             loading.cleanRemnantsFromConfig()
             config = loading
         }
+
+        globalWhitelist = config.templates.values
+            .filter { it.isWhitelist }
+            .flatMapTo(mutableSetOf()) { it.appList }
 
         logI(TAG) { "Config loaded" }
     }
@@ -462,6 +475,10 @@ class HMAService(val pms: IPackageManager, val pmn: Any?) : IHMAService.Stub() {
                 }
             }
         }
+
+        // ABK GLOBAL_WHITELIST_ABK: the disk layer treats every whitelist-template
+        // package as visible for every target; keep the two layers identical.
+        if (query in globalWhitelist) return false
 
         if (appConfig.useWhitelist && appConfig.excludeSystemApps && query in systemApps) return false
 
