@@ -189,6 +189,10 @@ object ConfigManager {
      *
      * @return target package name -> packages that must be invisible to it
      */
+    /** ABK WEBVIEW_EXEMPT_ABK: read-only view of [JsonConfig.webViewProtection]. */
+    val webViewProtectionEnabled: Boolean
+        get() = config.webViewProtection
+
     fun getSusfsTargetHides(
         userPackages: Set<String>,
         systemPackages: Set<String>,

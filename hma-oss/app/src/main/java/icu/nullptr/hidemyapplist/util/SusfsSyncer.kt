@@ -145,7 +145,7 @@ object SusfsSyncer {
      * visible for every target.
      */
     private fun alwaysVisible(): Set<String> {
-        if (!ConfigManager.config.webViewProtection) return emptySet()
+        if (!ConfigManager.webViewProtectionEnabled) return emptySet()
 
         val result = mutableSetOf<String>()
 
