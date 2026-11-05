@@ -43,6 +43,22 @@ if ! "$KSU_SUSFS" 2>&1 | grep -q 'add_hidden_uid_from'; then
     exit 3
 fi
 
+# ABK POLICY_FILE_ABK: the kernel can apply the whole table in one supercall,
+# which removes thousands of userspace calls (and the half-applied table that a
+# interrupted pass leaves behind).  Entries are collected first and handed over
+# once; on a kernel without support the same lines are replayed individually.
+POLICY_FILE="$SUSFS_DIR/policy.tsv"
+POLICY_MARKER="$SUSFS_DIR/.abk-policy"
+POLICY_ACTIVE=0
+
+policy_reset() {
+    : > "$POLICY_FILE" 2>/dev/null
+}
+
+policy_emit() {
+    printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$POLICY_FILE" 2>/dev/null
+}
+
 # ABK per-target helper: hide a path from ONE target uid only (kernel 'hide_from').
 add_hide_from() {
     _path="$1"
@@ -51,7 +67,34 @@ add_hide_from() {
     [ -z "$_path" ] && return 0
     [ -e "$_path" ] || return 0
 
+    if [ "$POLICY_ACTIVE" = "1" ]; then
+        policy_emit 1 "$_uid" "$_path"
+        return 0
+    fi
+
     "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1
+    return 0
+}
+
+# ABK POLICY_FILE_ABK: one supercall applies everything collected so far.
+policy_flush() {
+    [ -s "$POLICY_FILE" ] || return 0
+
+    : > "$POLICY_MARKER" 2>/dev/null
+
+    if "$KSU_SUSFS" add_sus_path_hide_from "$POLICY_MARKER" 0 >/dev/null 2>&1; then
+        _n="$(wc -l < "$POLICY_FILE" | tr -d ' ')"
+        echo "SUSFS_SYNC_INFO: kernel applied $_n policy entries in one supercall"
+        return 0
+    fi
+
+    # Old kernel: replay the collected lines one by one.
+    echo "SUSFS_SYNC_INFO: kernel has no policy loader, falling back to per-entry calls"
+    while IFS='|' read -r _mode _uid _path; do
+        [ -n "$_path" ] || continue
+        [ -n "$_mode" ] || continue
+        "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1
+    done < "$POLICY_FILE"
     return 0
 }
 
@@ -78,7 +121,13 @@ sync_target_hides() {
         # ABK SELF_VIEW_TARGET_ABK: an app never hides its own paths from itself
         [ -n "$_huid" ] && [ "$_tuid" = "$_huid" ] && continue
         if [ -n "$_huid" ] && [ -n "$_tuid" ]; then
-            "$KSU_SUSFS" add_hidden_uid_from "$_huid" "$_tuid" >/dev/null 2>&1 || true
+            if [ "$POLICY_ACTIVE" = "1" ]; then
+                # ABK POLICY_FILE_ABK: uid pairs are applied by the per-entry
+                # fallback (the kernel loader handles paths only).
+                printf '%s\t%s\n' "$_huid" "$_tuid" >> "$SUSFS_DIR/uid_pairs.tsv" 2>/dev/null
+            else
+                "$KSU_SUSFS" add_hidden_uid_from "$_huid" "$_tuid" >/dev/null 2>&1 || true
+            fi
         fi
 
         if [ "$_mode" = "data" ]; then
@@ -227,7 +276,23 @@ fi
 # ABK: per-target hiding (mirrors the API layer per target)
 mkdir -p /data/local/tmp/.hma_hf_probe 2>/dev/null
 if "$KSU_SUSFS" add_sus_path_hide_from /data/local/tmp/.hma_hf_probe 0 >/dev/null 2>&1; then
+    # ABK POLICY_FILE_ABK: collect everything first, hand it to the kernel once.
+    POLICY_ACTIVE=1
+    policy_reset
+    : > "$SUSFS_DIR/uid_pairs.tsv" 2>/dev/null
+
     sync_target_hides "$TARGETS_FILE"
+
+    policy_flush
+
+    # uid pairs are not part of the kernel path loader; apply them separately and
+    # deduplicate so a repeated sync does not spam the supercall.
+    if [ -s "$SUSFS_DIR/uid_pairs.tsv" ]; then
+        sort -u "$SUSFS_DIR/uid_pairs.tsv" | while IFS="$(printf '\t')" read -r _huid _tuid; do
+            [ -n "$_huid" ] && [ -n "$_tuid" ] || continue
+            "$KSU_SUSFS" add_hidden_uid_from "$_huid" "$_tuid" >/dev/null 2>&1 || true
+        done
+    fi
 else
     echo "SUSFS_SYNC_ERROR: $KSU_SUSFS does not support add_sus_path_hide_from (kernel too old?); per-target hiding skipped"
 fi

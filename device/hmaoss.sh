@@ -284,16 +284,27 @@ if [ -s "$EXTRA_FILE" ]; then
         return 0
     }
 
-    mkdir -p /data/local/tmp/.hma_hf_probe 2>/dev/null
-    if [ -n "$KSU_SUSFS" ] && "$KSU_SUSFS" add_sus_path_hide_from /data/local/tmp/.hma_hf_probe 0 >/dev/null 2>&1; then
-        sync_target_hides
-        # ABK: at boot-completed the per-app data dirs are not always
-        # resolvable yet, so targets listed late (the detector) were skipped.
-        # A second pass after the system settles makes the table complete.
-        sleep 30
-        sync_target_hides
+    # ABK BOOT_DELAY_ABK: do not touch the sus_path tables while the system is
+    # still booting.  One pass two minutes after boot is enough, and it is run by
+    # the managed script (which hands the whole table to the kernel in one call).
+    sleep 120
+
+    # ABK STORAGE_READY_ABK: /storage/emulated/0/Android/data only resolves after
+    # the user storage is unlocked.
+    _wait=0
+    while [ "$_wait" -lt 120 ]; do
+        [ -d /storage/emulated/0/Android/data ] && break
+        sleep 5
+        _wait=$((_wait + 1))
+    done
+
+    # ABK MODULE_SYNC_ABK: the module ships the managed script; install it first.
+    if [ -f "$MODDIR/sync.sh" ]; then
+        cp -f "$MODDIR/sync.sh" /data/adb/hma_susfs/sync.sh 2>/dev/null
     fi
-    rmdir /data/local/tmp/.hma_hf_probe 2>/dev/null
+    if [ -x /data/adb/hma_susfs/sync.sh ]; then
+        sh /data/adb/hma_susfs/sync.sh
+    fi
 ) &
 
 true

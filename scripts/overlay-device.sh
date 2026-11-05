@@ -17,6 +17,9 @@ install -m 0644 "$ROOT/device/susfs_sync.sh" "$HMA/app/src/main/assets/susfs_syn
 mkdir -p "$HMA/zygote/src/main/assets/susfs"
 install -m 0755 "$KSU" "$HMA/zygote/src/main/assets/susfs/ksu_susfs"
 
+# ABK MODULE_SYNC_ABK: ship the managed sync script with the module as well.
+install -m 0644 "$ROOT/device/susfs_sync.sh" "$HMA/zygote/src/main/assets/sync.sh"
+
 # sanity: the module must ship per-target support
 grep -q add_hidden_uid_from "$HMA/zygote/src/main/assets/hmaoss.sh" \
   || { echo "::error::hmaoss.sh missing add_hidden_uid_from" >&2; exit 1; }
