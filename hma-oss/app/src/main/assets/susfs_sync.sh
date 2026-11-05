@@ -283,6 +283,18 @@ if "$KSU_SUSFS" add_sus_path_hide_from /data/local/tmp/.hma_hf_probe 0 >/dev/nul
 
     sync_target_hides "$TARGETS_FILE"
 
+    # ABK MOUNT_PER_UID_ABK: mark every configured target uid as managed, so the
+    # kernel filters its mount view.  Unconfigured apps, system services and the
+    # preinstalled apps keep the untouched system view.
+    if [ -s "$TARGETS_FILE" ]; then
+        cut -f1 "$TARGETS_FILE" | sort -u | while IFS= read -r _tpkg; do
+            [ -n "$_tpkg" ] || continue
+            _tu="$(stat -c %u "/data/user/0/$_tpkg" 2>/dev/null)"
+            [ -n "$_tu" ] || _tu="$(stat -c %u "/data/data/$_tpkg" 2>/dev/null)"
+            [ -n "$_tu" ] && printf '4|%s|1\n' "$_tu" >> "$POLICY_FILE"
+        done
+    fi
+
     policy_flush
 
     # uid pairs are not part of the kernel path loader; apply them separately and
