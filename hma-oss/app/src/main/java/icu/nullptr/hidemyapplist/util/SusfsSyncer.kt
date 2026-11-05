@@ -2,6 +2,7 @@ package icu.nullptr.hidemyapplist.util
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import icu.nullptr.hidemyapplist.MyApp
 import icu.nullptr.hidemyapplist.service.ConfigManager
 import java.io.File
 
@@ -110,7 +111,9 @@ object SusfsSyncer {
 
         val installed = userPackages + systemPackages
         val lines = mutableListOf<String>()
-        ConfigManager.getSusfsTargetHides(userPackages, systemPackages, preinstalledPackages)
+        ConfigManager.getSusfsTargetHides(
+            userPackages, systemPackages, preinstalledPackages, alwaysVisible(),
+        )
             .forEach { (target, hidden) ->
             // Only installed apps can be targeted; the config may reference apps
             // that are not on this device, and the root script would waste a
@@ -133,6 +136,34 @@ object SusfsSyncer {
      *
      * The caller is responsible for running it on a background thread.
      */
+    /**
+     * ABK WEBVIEW_EXEMPT_ABK: HMAService.shouldHide() returns false for the current
+     * WebView provider and for the default browser while [JsonConfig.webViewProtection]
+     * is on.  The disk layer used to ignore that, so those two packages were hidden
+     * from every target on disk while PackageManager still showed them - exactly the
+     * mismatch the detectors cross-check.  Compute the same set here and treat it as
+     * visible for every target.
+     */
+    private fun alwaysVisible(): Set<String> {
+        if (!ConfigManager.config.webViewProtection) return emptySet()
+
+        val result = mutableSetOf<String>()
+
+        runCatching {
+            android.webkit.WebView.getCurrentWebViewPackage()?.packageName
+        }.getOrNull()?.let(result::add)
+
+        runCatching {
+            val app = MyApp.hmaApp
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                .apply { data = android.net.Uri.parse("http://example.com") }
+            app.packageManager
+                .resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+                ?.activityInfo?.packageName
+        }.getOrNull()?.let(result::add)
+
+        return result
+    }
     fun sync(context: Context): SyncResult {
         val script = try {
             context.assets.open(ASSET_NAME).bufferedReader().use { it.readText() }

@@ -193,11 +193,14 @@ object ConfigManager {
         userPackages: Set<String>,
         systemPackages: Set<String>,
         preinstalledPackages: Set<String> = emptySet(),
+        alwaysVisible: Set<String> = emptySet(),
     ): Map<String, Set<String>> {
         val result = LinkedHashMap<String, Set<String>>()
 
         config.scope.forEach { (target, cfg) ->
-            val visible = mutableSetOf<String>()
+            // ABK WEBVIEW_EXEMPT_ABK: packages the API layer never hides (current
+            // WebView provider / default browser while webViewProtection is on).
+            val visible = mutableSetOf<String>().apply { addAll(alwaysVisible) }
             val hidden = mutableSetOf<String>()
 
             cfg.applyTemplates.forEach { name ->
