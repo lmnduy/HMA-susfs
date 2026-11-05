@@ -1,96 +1,79 @@
-# 每应用视角：最终目标（定死，不再改动）
+# 每应用视角：最终目标（定死版 v2，2026-11-05）
 
 > 这份文件是需求的**唯一权威定义**。任何实现、重构、内核改动都必须逐条满足它；
-> 如果实现与本文冲突，改实现，不改本文。改动本文需要用户明确同意。
+> 实现与本文冲突时，**改实现，不改本文**。改动本文需要用户明确同意。
+>
+> 冻结标签：`spec-v2`（git tag）。此文件也备份在
+> `backups/spec-v2-desktop/PER-APP-VIEW.md`，桌面端另存一份。
 
-## 0. 不可违反的前提
+## 0. 不可违反的三条
 
-1. **应用永远不能把自己隐藏起来**（自己必须能看见自己）。
-   任何一层（磁盘/sus_path、PackageManager hook、挂载、探针）都必须先满足这条。
-2. **两层必须一致**：磁盘层（内核 sus_path / policy.tsv）与 API 层（Zygisk `shouldHide`）
+1. **任何应用都必须能看见自己**（永远不隐藏自己）。
+   磁盘层、PackageManager 层、挂载、探针，全部适用。
+2. **两层一致**：磁盘层（`policy.tsv` → 内核 per-uid sus_path）与 API 层（Zygisk `shouldHide`）
    对同一个 target 必须给出**完全相同**的可视集合。检测器会交叉验证这两层。
-3. **一切以 HMA 的既有模板配置为准**，不引入第二套配置来源。
+3. **一切以 HMA 既有的模板配置为准**，不引入第二套配置来源。
 
-## 1. 三个类别
+## 1. 三个类别（这是全部语义）
 
-设 `W` = 白名单模板里的应用集合（`templates[*].appList`，`isWhitelist = true` 的所有模板的并集）。
+记号：`W` = 白名单模板里的应用集合（所有 `isWhitelist = true` 模板的 `appList` 并集）。
+`T` = 某个应用（target）。
 
-### 类别 1：套了白名单模板，但自己**不在** W 里
+| # | 条件 | 能看见谁 | 谁能看见它 | 典型 |
+|---|---|---|---|---|
+| 1 | 套了白名单模板，**自己不在 W 里** | `W` + 自己 | **只有它自己**（别人看不到它） | 春秋、鸭子、Maple 等检测器；强度高的游戏/银行检测 |
+| 2 | 套了白名单模板，**自己在 W 里** | `W`（含自己） | 所有类别 1/2 的 target（因为它在 `W` 里） | 日常软件 |
+| 3 | **没套模板，也不在 W 里** | 只有自己 | **没有人**（对所有人不可见） | Root 管理器、HMA 自己、Root 工具等高风险应用 |
 
-例：春秋（`com.chunqiunativecheck`）、鸭子（`com.eltavine.duckdetector`）、Maple（`com.maple.detect`）
-这类是**检测软件**。
+为什么类别 1 要"别人看不到它"：高强度检测（游戏/银行）会把"检测器的存在"本身当成 root 标识，
+所以检测器必须从它们的视野里消失；同时检测器自己必须看得见正常世界（`W`），否则"通过检测"毫无意义。
 
-- **能看见**：`W` 里的应用 + 自己
-- **不能看见**：所有不在 `W` 里的应用（管理类、Root 工具、HMA 自己、其他检测器）
+## 2. 由三类推出的唯一公式
 
-理由：检测器必须看到"正常应用的正常世界"才有意义；让它什么都看不见是自欺欺人。
-同时它不能看到敏感应用，否则它会把它们报出来。
-
-### 类别 2：套了白名单模板，且自己在 W 里
-
-- **能看见**：`W` 里的应用（含自己）
-- **能被看见**：因为它在 `W` 里，所有类别 1/2 的 target 都能看见它
-- 它看不见 `W` 之外的应用
-
-### 类别 3：没套模板，也不在 W 里
-
-- **对所有人不可见**（任何类别 1/2 的 target 都看不到它）
-- 如果它自己也是 target（配置了隐藏），它仍然**能看见自己**（前提 1）
-
-## 2. 由此推出的实现规则
-
-对任意 target `T`（`config.scope` 里有条目的应用）：
+对任意 target `T`：
 
 ```
 visible(T) = W ∪ {T} ∪ alwaysVisible
-hidden(T)  = pool - visible(T)
+hidden(T)  = pool − visible(T)
 ```
 
-其中：
+- `pool`：用户应用；`excludeSystemApps == false` 时再加系统应用；**再减去预装应用**
+  （`/system /system_ext /product /vendor /odm /cust /apex`——MIUI 输入法在 `/product/data-app`）。
+- `alwaysVisible`：`webViewProtection` 打开时的"当前 WebView 提供者 + 默认浏览器"（API 层本来就不隐藏它们）。
+- `extraAppList` / `extraOppositeAppList` 只在此基础上做增减，不改变主公式。
 
-- `pool` = 用户应用；若 `excludeSystemApps == false` 再加入系统应用；
-  **再减去预装应用**（`/system /system_ext /product /vendor /odm /cust /apex`，MIUI 输入法在 `/product/data-app`）。
-- `alwaysVisible` = `webViewProtection` 打开时的"当前 WebView 提供者 + 默认浏览器"（API 层本来就不隐藏它们）。
-- 白名单模式（`useWhitelist=true`）与黑名单模式的差异只体现在 `extraAppList` / `extraOppositeAppList`，
-  不改变上面这条主公式。
+**白名单模式隐式生效**：只要 target 是白名单模式（`useWhitelist = true`），它自动看见 `W`，
+不要求 `applyTemplates` 里显式写着"白名单"（春秋在配置里就是白名单模式 + 未勾模板）。
 
-### 白名单不靠"显式套模板"生效
+## 3. 与实现的对应
 
-只要 target 是**白名单模式**（`useWhitelist = true`），它就自动看见 `W`，
-**不要求** `applyTemplates` 里显式写着"白名单"。
+| 层 | 位置 | 如何满足 |
+|---|---|---|
+| 磁盘 | `ConfigManager.getSusfsTargetHides()` | `visible` 以 `W ∪ alwaysVisible` 初始化，`hidden = pool − visible`，最后 `hidden.remove(T)` |
+| API | `HMAService.shouldHide()` | `if (query in globalWhitelist) return false`；`globalWhitelist` 在 `loadConfig()` 重建 |
+| 内核 | `sync.sh` → `policy.tsv` → `ksu_susfs add_sus_path_hide_from .abk-policy 0` | 一次性整表加载（`patch_susfs_policy_file.py`） |
 
-原因：春秋这类检测器在配置里就是"白名单模式 + 没有勾选任何应用模板"，
-而按类别 1，它必须看见 `W`。所以 `W` 对白名单模式是**隐式生效**的。
+## 4. 验收（每次改动后必须全部满足）
 
-## 3. 三个类别的判定（用当前设备的真实数据核对）
+1. 春秋：不出现「隐藏应用列表生效」；且**不是瞎子**（白名单应用可见）。
+2. 春秋/鸭子/Maple **看不到** HMA、Magisk、KSUNext、Scene、ReSukisu，以及**彼此**。
+3. 任意 target 的 hidden 集合里**不含它自己**。
+4. 鸭子 0 Danger；Maple ALL CLEAR（0 危险 0 可疑）。
+5. `policy.tsv` 推导出的集合与 API 层完全一致。
 
-| 应用 | 模板 | 在 W 里 | 类别 | 应看到 |
-|---|---|---|---|---|
-| 春秋 | —— | 否 | 1 | W + 自己 |
-| 鸭子 | —— | 否 | 1 | W + 自己 |
-| Maple | —— | 否 | 2 | W（含自己） |
-| HMA / Magisk / KSUNext / Scene / ReSukisu | —— | 否 | 3 | 只能看见自己（对他人不可见） |
+### 本机实测（2026-11-05，`d9a5de0` / `known-good-2026-11-05c`）
 
-> 注：上表的"模板"列按 `config.json` 现状（`applyTemplates` 为空）；
-> 这不影响结论，因为类别 1 的白名单可见性是隐式生效的。
+| 检测器 | 看不到的包（从 policy.tsv 按 uid 导出） |
+|---|---|
+| 春秋 10284 | HMA、ReSukisu、HyperCeiler、Scene、bin.mt.plus、droidspaces、viewprobe、**鸭子、Maple**、tmall 检测 |
+| 鸭子 10336 | HMA、ReSukisu、HyperCeiler、Scene、…、**春秋、Maple** |
+| Maple 10299 | HMA、ReSukisu、HyperCeiler、Scene、…、**春秋、鸭子** |
 
-## 4. 验收标准
+- 每个 target 的 hidden 集合都不含自己 ✅
+- 春秋/鸭子：1 项（USB）/ 0 Danger；Maple：ALL CLEAR 259/259 ✅
 
-改动后必须同时满足：
+## 5. 变更记录
 
-1. 春秋：`隐藏应用列表生效` **不出现**；并且它不是"瞎子"——
-   能列出 `W` 里的应用（例如随便挑一个白名单应用，检测器能看到它）。
-2. 春秋/鸭子/Maple **看不到** HMA、Magisk、KernelSU、Scene、ReSukisu。
-3. 鸭子：0 Danger。
-4. Maple：ALL CLEAR，0 危险 0 可疑。
-5. 每个 target 都**能看见自己**（不能被自己的规则隐藏）。
-6. `policy.tsv`（磁盘层）与 API 层的 hidden 集合对每个 target **完全一致**。
-
-## 5. 当前实现状态
-
-- 磁盘层：`ConfigManager.getSusfsTargetHides()`
-- API 层：`HMAService.shouldHide()`
-- 内核：policy.tsv 由 `sync.sh` 生成，经 `ksu_susfs add_sus_path_hide_from /data/adb/hma_susfs/.abk-policy 0`
-  一次性加载（`ABK/.github/scripts/patch_susfs_policy_file.py`）。
-
-任何一层改动后，都要按 §4 重新验收，并更新 `MEMORY.md`。
+- v1（初版）：三类别草稿，含"仅公式"。
+- **v2（本文，冻结）**：补上"谁能看见它"维度（类别 1 对他人不可见）、明确白名单模式隐式生效、
+  加入实现对应表与实测数据。
