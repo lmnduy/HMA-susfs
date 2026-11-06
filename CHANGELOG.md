@@ -54,3 +54,31 @@
 ### 文档
 
 - 记录构建拆分、补丁顺序与 Windows 上 CRLF 导致锚点失配的陷阱。
+
+## 2026-11-06 — 内核侧整表加载 + per-app 视角定版
+
+### 内核（ABK）
+- **`patch_susfs_policy_file.py`（新）**：`ksu_susfs add_sus_path_hide_from /data/adb/hma_susfs/.abk-policy 0`
+  让内核读取 `policy.tsv`（`mode|uid|path`），在**一次系统调用**里建好整张 per-target sus_path 表；
+  实测 `policy: applied 3439 entries`，替代原先数千次用户态调用。
+- **`patch_susfs_mount_per_uid.py`（新）**：挂载视图按 uid 门控（`4|uid|1` 位图），
+  并让 `fs/namespace.c`（路径解析）与 `fs/proc/fd.c`（fdinfo）使用**同一判据**，
+  修复「挂载视图不一致」类检测。
+- **isolated 进程自动受管**：`90000–99999` 视为受管，修复以 WebView 沙箱进程为 baseline 的
+  「cross-process mount tables diverge」。
+- 经验：`proc_namespace.c` 三处入口只能**改条件**，不能守护 return（否则 `-Werror=return-type`）；
+  头文件不保证可见时需就地 `extern`。
+
+### 模块 / APK
+- `sync.sh` 改为「收集 → 写 `policy.tsv` → 一次下发」，旧内核自动回退逐条；并下发 `4|<uid>|1` 受管 uid。
+- 模块自带 `sync.sh`，开机脚本先安装再执行；开机同步固定在 **开机 120s 且用户存储就绪之后**。
+- **白名单语义（spec-v2）**：`visible(T) = W ∪ {T} ∪ alwaysVisible`，`hidden(T) = pool − visible(T)`；
+  白名单模式**隐式**看见 `W`；永不自隐藏；两层（磁盘/PM）同源。
+- 修复：`shouldHide()` 内重入 PM 查询导致卡死（改为启动时一次性建集合）；
+  属性声明顺序导致 hook 未安装（`preinstalledApps` 必须在 `init{}` 之前）。
+- 磁盘层补上 WebView/默认浏览器豁免，与 API 层对齐。
+
+### 验收
+- 春秋：仅「USB 调试已开启」（开机同步的「挂载间隙」为瞬态，同步结束自愈）
+- 鸭子：0 Danger
+- Maple：ALL CLEAR（258/258）
