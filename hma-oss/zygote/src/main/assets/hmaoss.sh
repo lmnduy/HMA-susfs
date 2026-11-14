@@ -108,13 +108,12 @@ cp "$MODDIR/module.prop.bak" "$MODDIR/module.prop"
         _loop="$3"
 
         [ -z "$_path" ] && return 0
-        [ -e "$_path" ] || return 0
 
-        if [ "$_loop" = "1" ]; then
-            "$KSU_SUSFS" add_sus_path_loop "$_path" "$_uid" >/dev/null 2>&1
-        else
-            "$KSU_SUSFS" add_sus_path "$_path" "$_uid" >/dev/null 2>&1
-        fi
+        # ABK SUS_PATH_LOOP_MODE_ABK: every plain hide-list path goes through
+        # the loop variant; the kernel re-resolves and re-flags it on every app
+        # spawn, so inode churn cannot lose the hiding.
+        "$KSU_SUSFS" add_sus_path_loop "$_path" "$_uid" >/dev/null 2>&1
+        return 0
 
         return 0
     }
@@ -157,7 +156,47 @@ cp "$MODDIR/module.prop.bak" "$MODDIR/module.prop"
         done < "$PKGS_FILE"
     fi
 
-    if [ -s "$EXTRA_FILE" ]; then
+    # ABK EXTRA_PKG_EXPAND_ABK: the "<PKG>" placeholder used to expand over
+# pkgs.txt only, but in HMA's per-target mode pkgs.txt stays empty (the hide
+# relations live in targets.txt as "<target>\t<hidden>"), so every
+# "/data/data/<PKG>" style extra path silently did nothing.
+hidden_pkgs() {
+    {
+        [ -s "$SUSFS_DIR/targets.txt" ] && cut -f2 "$SUSFS_DIR/targets.txt" 2>/dev/null
+        [ -s "$SUSFS_DIR/pkgs.txt" ] && cat "$SUSFS_DIR/pkgs.txt" 2>/dev/null
+    } | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | grep -v '^#' | sort -u
+}
+
+# ABK EXTRA_PATH_SCOPE_ABK: an extra path must be hidden only from the apps
+# configured to hide things (targets.txt column 1); the hidden app keeps its
+# own view and whitelisted apps keep a complete view (A->B visible, C->B hidden).
+hidden_targets() {
+    [ -s "$SUSFS_DIR/targets.txt" ] && cut -f1 "$SUSFS_DIR/targets.txt" 2>/dev/null \
+        | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | grep -v '^#' | sort -u
+}
+
+apply_extra_path_for_targets() {
+    _path="$1"
+    _targets="$2"
+
+    [ -n "$_path" ] || return 0
+    [ -e "$_path" ] || return 0
+    [ -n "$_targets" ] || return 0
+
+    # ABK SELF_VIEW_ABK: never hide a path from the app that owns it
+    _owner_uid="$(stat -c %u "$_path" 2>/dev/null)"
+
+    printf '%s\n' "$_targets" | while IFS= read -r _tpkg; do
+        [ -n "$_tpkg" ] || continue
+        _tuid="$(stat -c %u "/data/user/0/$_tpkg" 2>/dev/null)"
+        [ -n "$_tuid" ] || continue
+        [ "$_tuid" = "$_owner_uid" ] && continue
+        "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_tuid" >/dev/null 2>&1 || true
+    done
+}
+
+if [ -s "$EXTRA_FILE" ]; then
+    _targets="$(hidden_targets)"
         while IFS= read -r _line; do
             case "$_line" in
                 ""|"#"*) continue ;;
@@ -165,22 +204,21 @@ cp "$MODDIR/module.prop.bak" "$MODDIR/module.prop"
 
             case "$_line" in
                 *"<PKG>"*)
-                    if [ -s "$PKGS_FILE" ]; then
-                        while IFS= read -r _pkg; do
-                            case "$_pkg" in
-                                ""|"#"*) continue ;;
-                            esac
-
-                            _uid="$(stat -c %u "/data/user/0/$_pkg" 2>/dev/null)" || true
-                            [ -z "$_uid" ] && _uid="-1"
+                    _pkg_list="$(hidden_pkgs)"
+                    if [ -n "$_pkg_list" ]; then
+                        printf '%s\n' "$_pkg_list" | while IFS= read -r _pkg; do
+                            [ -n "$_pkg" ] || continue
 
                             _expanded="$(printf '%s' "$_line" | sed "s|<PKG>|$_pkg|g")" || true
-                            add_sus_path "$_expanded" "$_uid" 0
-                        done < "$PKGS_FILE"
+                            apply_extra_path_for_targets "$_expanded" "$_targets"
+                        done
+                        echo "SUSFS_SYNC_INFO: expanded '$_line' over $(printf '%s\n' "$_pkg_list" | wc -l) hidden package(s), hidden from $(printf '%s\n' "$_targets" | wc -l) target(s)"
+                    else
+                        echo "SUSFS_SYNC_WARN: no hidden package to expand '$_line' with (targets.txt/pkgs.txt empty)"
                     fi
                     ;;
                 *)
-                    add_sus_path "$_line" "-1" 0
+                    apply_extra_path_for_targets "$_line" "$_targets"
                     ;;
             esac
         done < "$EXTRA_FILE"
@@ -246,16 +284,36 @@ cp "$MODDIR/module.prop.bak" "$MODDIR/module.prop"
         return 0
     }
 
-    mkdir -p /data/local/tmp/.hma_hf_probe 2>/dev/null
-    if [ -n "$KSU_SUSFS" ] && "$KSU_SUSFS" add_sus_path_hide_from /data/local/tmp/.hma_hf_probe 0 >/dev/null 2>&1; then
-        sync_target_hides
-        # ABK: at boot-completed the per-app data dirs are not always
-        # resolvable yet, so targets listed late (the detector) were skipped.
-        # A second pass after the system settles makes the table complete.
-        sleep 30
-        sync_target_hides
+    # ABK BOOT_DELAY_ABK: do not touch the sus_path tables while the system is
+    # still booting.  One pass two minutes after boot is enough, and it is run by
+    # the managed script (which hands the whole table to the kernel in one call).
+    sleep 120
+
+    # ABK STORAGE_READY_ABK: /storage/emulated/0/Android/data only resolves after
+    # the user storage is unlocked.
+    _wait=0
+    while [ "$_wait" -lt 120 ]; do
+        [ -d /storage/emulated/0/Android/data ] && break
+        sleep 5
+        _wait=$((_wait + 1))
+    done
+
+    # ABK MODULE_SYNC_ABK: the module ships the managed script; install it first.
+    if [ -f "$MODDIR/sync.sh" ]; then
+        cp -f "$MODDIR/sync.sh" /data/adb/hma_susfs/sync.sh 2>/dev/null
     fi
-    rmdir /data/local/tmp/.hma_hf_probe 2>/dev/null
+    if [ -x /data/adb/hma_susfs/sync.sh ]; then
+        # ABK NO_SILENT_SUCCESS_ABK: the managed script now exits non-zero when an
+        # entry could not be enforced; give it one more chance once the system has
+        # settled, and leave a marker if it still fails.
+        if ! sh /data/adb/hma_susfs/sync.sh; then
+            sleep 30
+            if ! sh /data/adb/hma_susfs/sync.sh; then
+                echo "SUSFS_BOOT_ERROR: sync still failing after retry" \
+                    > /data/adb/hma_susfs/last_boot_sync_error 2>/dev/null
+            fi
+        fi
+    fi
 ) &
 
 true

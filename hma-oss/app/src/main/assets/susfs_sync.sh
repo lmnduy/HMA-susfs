@@ -50,6 +50,7 @@ fi
 POLICY_FILE="$SUSFS_DIR/policy.tsv"
 POLICY_MARKER="$SUSFS_DIR/.abk-policy"
 POLICY_ACTIVE=0
+FAILED=0
 
 policy_reset() {
     : > "$POLICY_FILE" 2>/dev/null
@@ -72,8 +73,8 @@ add_hide_from() {
         return 0
     fi
 
+    # ABK NO_SILENT_SUCCESS_ABK: report the kernel's answer, the caller counts it
     "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1
-    return 0
 }
 
 # ABK POLICY_FILE_ABK: one supercall applies everything collected so far.
@@ -87,13 +88,19 @@ policy_flush() {
         echo "SUSFS_SYNC_INFO: kernel applied $_n policy entries in one supercall"
         return 0
     fi
+    # ABK NO_SILENT_SUCCESS_ABK: the kernel refused the batch - replay one by one
+    # and count the ones that still cannot be installed.
 
     # Old kernel: replay the collected lines one by one.
     echo "SUSFS_SYNC_INFO: kernel has no policy loader, falling back to per-entry calls"
     while IFS='|' read -r _mode _uid _path; do
         [ -n "$_path" ] || continue
         [ -n "$_mode" ] || continue
-        "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1
+        case "$_mode" in
+            4) ;; # managed-uid marker: nothing to hide
+            *) "$KSU_SUSFS" add_sus_path_hide_from "$_path" "$_uid" >/dev/null 2>&1 \
+                   || FAILED=$((FAILED + 1)) ;;
+        esac
     done < "$POLICY_FILE"
     return 0
 }
@@ -126,7 +133,9 @@ sync_target_hides() {
                 # fallback (the kernel loader handles paths only).
                 printf '%s\t%s\n' "$_huid" "$_tuid" >> "$SUSFS_DIR/uid_pairs.tsv" 2>/dev/null
             else
-                "$KSU_SUSFS" add_hidden_uid_from "$_huid" "$_tuid" >/dev/null 2>&1 || true
+                # ABK NO_SILENT_SUCCESS_ABK: a failed pair must not look like success
+                "$KSU_SUSFS" add_hidden_uid_from "$_huid" "$_tuid" >/dev/null 2>&1 \
+                    || FAILED=$((FAILED + 1))
             fi
         fi
 
@@ -138,7 +147,7 @@ sync_target_hides() {
 
         for _p in $_paths
         do
-            add_hide_from "$_p" "$_tuid"
+            add_hide_from "$_p" "$_tuid" || FAILED=$((FAILED + 1))
         done
     done < "$_targets_file"
 
@@ -309,6 +318,13 @@ else
     echo "SUSFS_SYNC_ERROR: $KSU_SUSFS does not support add_sus_path_hide_from (kernel too old?); per-target hiding skipped"
 fi
 rmdir /data/local/tmp/.hma_hf_probe 2>/dev/null
+
+# ABK NO_SILENT_SUCCESS_ABK: SUSFS_SYNC_OK is a promise that every configured entry
+# is enforced; a single failed upsert breaks that promise, so say so instead.
+if [ "${FAILED:-0}" -gt 0 ]; then
+    echo "SUSFS_SYNC_ERROR: $FAILED entr(ies) could not be enforced"
+    exit 4
+fi
 
 echo "SUSFS_SYNC_OK"
 exit 0

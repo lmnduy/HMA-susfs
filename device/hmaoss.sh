@@ -303,7 +303,16 @@ if [ -s "$EXTRA_FILE" ]; then
         cp -f "$MODDIR/sync.sh" /data/adb/hma_susfs/sync.sh 2>/dev/null
     fi
     if [ -x /data/adb/hma_susfs/sync.sh ]; then
-        sh /data/adb/hma_susfs/sync.sh
+        # ABK NO_SILENT_SUCCESS_ABK: the managed script now exits non-zero when an
+        # entry could not be enforced; give it one more chance once the system has
+        # settled, and leave a marker if it still fails.
+        if ! sh /data/adb/hma_susfs/sync.sh; then
+            sleep 30
+            if ! sh /data/adb/hma_susfs/sync.sh; then
+                echo "SUSFS_BOOT_ERROR: sync still failing after retry" \
+                    > /data/adb/hma_susfs/last_boot_sync_error 2>/dev/null
+            fi
+        fi
     fi
 ) &
 
