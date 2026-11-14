@@ -82,3 +82,25 @@
 - 春秋：仅「USB 调试已开启」（开机同步的「挂载间隙」为瞬态，同步结束自愈）
 - 鸭子：0 Danger
 - Maple：ALL CLEAR（258/258）
+## 2026-11-14 — 磁盘层隐藏闭环 + 内核并发/失败语义修正
+
+### 根因修复（此前「三件套全绿但磁盘层没生效」）
+- **策略加载器对所有规则入队**（原来只投 `mode 2`，而 `sync.sh` 生成的全是 `mode 1`）：
+  inode 被回收后 `AS_FLAGS_SUS_PATH_HIDE_FROM` 再没人重新置位，谓词 `flag && denied` 永不成立。
+  修复后加载时新增 **2369** 条 loop 队列，探针实测 `denied=1` 命中、`dataMissing` 出现 HMA/HyperCeiler/Scene。
+- **FUSE `ino == 0`**：用 `get_fuse_inode()` 解析真实 inode；解析不到计 `deferred` 并投队列，
+  不再计 `failed`（此前每次同步以 `-EIO` 收场，用户态误判「内核无 loader」）。
+- **`sync.sh` 不再把「内核拒绝」当「内核不支持」**：空策略文件探测 loader，被拒报
+  `SUSFS_SYNC_ERROR` 并非 0 退出；只有真不支持才逐条回退。
+
+### 内核（ABK）
+- 策略加载加**专用互斥量**（可睡眠操作，全部返回路径释放锁）。
+- 受管 uid 集合：**双缓冲 + RCU 发布**（读者不再看到半清空集合）；4096 槽开放寻址支持多用户 uid；
+  `statfs` 与 mountinfo/路径/fdinfo 统一判据；isolated（90000–99999）自动受管。
+- Review 修复：readdir 缓存命中分支查表、oracle 钩子加 `CONFIG_KSU_SUSFS_SUS_PATH` 守卫、
+  CLI 补 `CMD_SUSFS_ADD_HIDDEN_UID_FROM` 宏、kstat 锚点容错且只伪装身份字段、
+  `add_sus_path` 的 `uid < 0` 现会撤销旧可见 uid（RCU 安全批量删除）。
+
+### 验收
+春秋 4.6.3 仅「USB 调试」；鸭子 0 Danger / 2 Warning；Maple 2.3.0 ALL CLEAR 260/260。
+内核 `ab10000045`（tag `known-good-kernel-ab10000045`），模块/APK `a9258e4`，HMA tag `known-good-2026-11-14`。
