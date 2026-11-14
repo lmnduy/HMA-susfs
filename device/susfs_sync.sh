@@ -49,6 +49,7 @@ fi
 # once; on a kernel without support the same lines are replayed individually.
 POLICY_FILE="$SUSFS_DIR/policy.tsv"
 POLICY_MARKER="$SUSFS_DIR/.abk-policy"
+POLICY_DESIRED="$POLICY_FILE.desired"
 POLICY_ACTIVE=0
 FAILED=0
 
@@ -83,16 +84,37 @@ policy_flush() {
 
     : > "$POLICY_MARKER" 2>/dev/null
 
-    if "$KSU_SUSFS" add_sus_path_hide_from "$POLICY_MARKER" 0 >/dev/null 2>&1; then
-        _n="$(wc -l < "$POLICY_FILE" | tr -d ' ')"
-        echo "SUSFS_SYNC_INFO: kernel applied $_n policy entries in one supercall"
-        return 0
-    fi
-    # ABK NO_SILENT_SUCCESS_ABK: the kernel refused the batch - replay one by one
-    # and count the ones that still cannot be installed.
+    # Keep what policy_emit() collected; the probe below needs an empty file.
+    cp -f "$POLICY_FILE" "$POLICY_DESIRED" 2>/dev/null
 
-    # Old kernel: replay the collected lines one by one.
+    # ABK NO_FALSE_FALLBACK_ABK: decide once whether this kernel has the loader,
+    # using an empty policy file (the loader answers -ENOENT when there is nothing
+    # to apply).  A non-zero exit for a *supported* loader must NOT be mistaken for
+    # "no loader": that would replay every entry one by one and hide the refusal.
+    : > "$POLICY_FILE"
+    "$KSU_SUSFS" add_sus_path_hide_from "$POLICY_MARKER" 0 >/dev/null 2>&1
+    _probe_rc=$?
+    case "$_probe_rc" in
+        0|254) _has_loader=1 ;;   # 0 = empty ok, 254 = -ENOENT (empty file)
+        *)     _has_loader=0 ;;
+    esac
+
+    if [ "$_has_loader" = "1" ]; then
+        _n="$(wc -l < "$POLICY_DESIRED" 2>/dev/null | tr -d ' ')"
+        cp -f "$POLICY_DESIRED" "$POLICY_FILE" 2>/dev/null
+        "$KSU_SUSFS" add_sus_path_hide_from "$POLICY_MARKER" 0 >/dev/null 2>&1
+        _rc=$?
+        if [ "$_rc" -eq 0 ]; then
+            echo "SUSFS_SYNC_INFO: kernel applied $_n policy entries in one supercall"
+            return 0
+        fi
+        echo "SUSFS_SYNC_ERROR: kernel policy loader refused entries (rc=$_rc)"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+
     echo "SUSFS_SYNC_INFO: kernel has no policy loader, falling back to per-entry calls"
+    cp -f "$POLICY_DESIRED" "$POLICY_FILE" 2>/dev/null
     while IFS='|' read -r _mode _uid _path; do
         [ -n "$_path" ] || continue
         [ -n "$_mode" ] || continue
