@@ -85,7 +85,16 @@ hidden(T)  = pool − visible(T)
 鸭子报 `cross-process mount tables diverge`、春秋报「挂载间隙」。
 isolated 进程必须计入 app 域，否则以它为 baseline 的对比必然发现差异。
 
-## 6. 变更记录'
+'## 6. 内核侧实现要点（2026-11-14 定版）
+
+`susfs_load_policy_file()` 一次 supercall 建表，必须同时满足：
+
+1. upsert 后**置位** `AS_FLAGS_SUS_PATH_HIDE_FROM`（含 FUSE inode）——谓词要求「标志 + 表项」同时成立；
+2. **每条规则都投进 loop 队列**（不只 mode 2）——inode 被回收后靠它重新置位，否则加载瞬间有效、之后失效；
+3. `ino == 0`（FUSE）用 `get_fuse_inode()` 解析真实 inode；解析不到则 `deferred` + 投队列，不算 failed；
+4. 有失败（`failed > 0`）返回 `-EIO`，用户态据此报错而不是回退重放。
+
+## 7. 变更记录''
 
 - v1（初版）：三类别草稿，含"仅公式"。
 - **v2（本文，冻结）**：补上"谁能看见它"维度（类别 1 对他人不可见）、明确白名单模式隐式生效、
