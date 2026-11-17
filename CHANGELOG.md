@@ -104,3 +104,20 @@
 ### 验收
 春秋 4.6.3 仅「USB 调试」；鸭子 0 Danger / 2 Warning；Maple 2.3.0 ALL CLEAR 260/260。
 内核 `ab10000045`（tag `known-good-kernel-ab10000045`），模块/APK `a9258e4`，HMA tag `known-good-2026-11-14`。
+## 2026-11-17 — 应用侧可见性加固（内核侧）+ CONFIG_USER_NS
+
+配合内核 `1f706fe`（tag `known-good-kernel-abk-vis-2026-11-17`），详见
+`ABK/docs/APP-VISIBILITY.md`。
+
+- **目录遮蔽**：`/data/local/tmp` 对 app 可见但内容为空——`link_path_walk()` 对遮蔽目录
+  的子项返回 `ENOENT`，目录本身仍可 `stat`。仅做 readdir 屏蔽无效（0771 已禁止列表，
+  真正的泄漏是 stat 已知文件名）。
+- **devpts 属主**：`/dev/pts/N` 仅对拥有者可见；`/dev/pts/ptmx`（字符 5:2）显式放行，
+  否则应用无法分配 PTY。
+- **`/dev` 外来挂载**：挂载点属主 root、文件系统非设备类（白名单见文档）的挂载对 app 隐藏；
+  droidspace 的 f2fs/erofs 镜像挂载不再出现在 app 的 mountinfo。
+- **CONFIG_USER_NS=y + CONFIG_NAMESPACES=y**，真实 defconfig 与 `/proc/config.gz`
+  伪装配置同步修改。
+
+验证：droidspace 运行时 Duck Detector 通过；手工在 `/dev` 下 bind 三个挂载
+（f2fs×2、erofs×1），app 视角全不可见、root 视角全可见。
