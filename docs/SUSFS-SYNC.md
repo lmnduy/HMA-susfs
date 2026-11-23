@@ -56,5 +56,7 @@ susfs_load_policy_file()            （内核）建表 + 置位 + 投 loop 队�
 - `HMA-OSS-main-<hash>-release.apk`（release 版管理器）
 - `HMA-OSS-ZYGISK-main-<hash>-release.zip`（Zygisk 模块，内含同一个 `manager.apk`）
 
+当前产物（2026-11-23）：`hma-oss-release-2026-11-23`，含 release APK、Zygisk 模块与 `ksu_susfs`。
+
 注意：CI 使用 runner 自己的 debug 签名，与本机 `adb install -r` 安装过的 APK **签名不同**，
 覆盖安装前需先卸载（配置用首页「备份配置 / 还原配置」迁移）。

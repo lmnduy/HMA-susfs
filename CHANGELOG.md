@@ -153,3 +153,14 @@ API 层实时计算 → 立刻隐藏；磁盘层是快照 → 没有规则。排
 `stat -c %y targets.txt` 与目标包安装时间对比。
 
 详见 `docs/SUSFS-SYNC.md`。
+
+### 发布产物（release，云编译）
+
+- Release：<https://github.com/lmnduy/HMA-susfs/releases/tag/hma-oss-release-2026-11-23>
+  - `HMA-OSS--fe7bc18-release.apk`（3.6 MB，R8 精简）
+  - `HMA-OSS-ZYGISK--fe7bc18-release.zip`（2.7 MB，内含同一版 `manager.apk`）
+  - `ksu_susfs`（per-target 工具）
+- 工作流：`.github/workflows/build-hma-susfs.yml`，新增 `build_type` 输入（release|debug，默认 release）。
+- 签名：release 由 CI runner 的 debug keystore 签名（SHA-256 `fd927afd…`）。设备上现装的是
+  本地构建（`main-ac7cfeb+1`，签名 `0484…`），两者不能互相覆盖升级——换装时先导出配置、
+  卸载、安装、再还原。
