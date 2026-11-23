@@ -7,6 +7,14 @@ on:
         description: "SUSFS commit (overrides upstream/susfs.env)"
         required: false
         type: string
+      build_type:
+        description: "Gradle variant (release or debug)"
+        required: false
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
 
 permissions:
   contents: read
@@ -79,7 +87,7 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleDebug
+          ./gradlew --no-daemon ":app:assemble${{ inputs.build_type == 'debug' && 'Debug' || 'Release' }}"
 
       - name: Build Zygisk module
         working-directory: ${{ github.workspace }}/hma-oss
@@ -87,14 +95,18 @@ jobs:
           set -euo pipefail
           rm -f zygote/src/main/assets/manager.apk
           rm -rf zygote/build/generated/source/signInfo
-          ./gradlew --no-daemon :zygote:assembleDebug
+          # the module bundles the manager APK of the same variant; make sure a stale
+          # one from another variant cannot be picked up
+          rm -rf "$GITHUB_WORKSPACE/hma-oss/zygote/build/outputs/magisk"
+          ./gradlew --no-daemon ":zygote:assemble${{ inputs.build_type == 'debug' && 'Debug' || 'Release' }}"
 
       - name: Collect artifacts
         run: |
           set -euo pipefail
           mkdir -p out
-          find "$GITHUB_WORKSPACE/hma-oss/app/build/outputs/apk/debug" -name '*.apk' -exec cp -v {} out/ \;
-          find "$GITHUB_WORKSPACE/hma-oss/zygote/build/outputs/magisk/debug" -name '*.zip' -exec cp -v {} out/ \;
+          VARIANT="${{ inputs.build_type == 'debug' && 'debug' || 'release' }}"
+          find "$GITHUB_WORKSPACE/hma-oss/app/build/outputs/apk/$VARIANT" -name '*.apk' -exec cp -v {} out/ \;
+          find "$GITHUB_WORKSPACE/hma-oss/zygote/build/outputs/magisk/$VARIANT" -name '*.zip' -exec cp -v {} out/ \;
           cp -v "$WORK/out/ksu_susfs" out/ksu_susfs
           ls -l out
 
