@@ -114,6 +114,13 @@ policy_flush() {
     fi
 
     echo "SUSFS_SYNC_INFO: kernel has no policy loader, falling back to per-entry calls"
+    # ABK NO_LOADER_M4_ABK: only the policy loader can register managed uids (mode 4
+    # lines), and they are what makes the kernel's mount filter apply to target apps.
+    # On the fallback path the previous registration stays in place, so say so instead
+    # of letting the mount view silently drift.
+    if grep -q '^4|' "$POLICY_DESIRED" 2>/dev/null; then
+        echo "SUSFS_SYNC_WARN: managed uids (mode 4) need the policy loader; the mount filter keeps its previous state"
+    fi
     cp -f "$POLICY_DESIRED" "$POLICY_FILE" 2>/dev/null
     while IFS='|' read -r _mode _uid _path; do
         [ -n "$_path" ] || continue
