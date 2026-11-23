@@ -49,7 +49,21 @@ susfs_load_policy_file()            （内核）建表 + 置位 + 投 loop 队�
    - `sync()` 增加 `NO_EMPTY_TARGETS_ABK` 守卫：清单为空且同步开启时**拒绝写入**，
      保留上一份可用文件并返回失败信息。
 
+## 三、内核加载器的两个不变式（2026-11-23 补）
+
+1. **空策略文件 = 无可执行内容 = `-ENOENT`**，绝不能返回 `-EINVAL`。`sync.sh` 用空文件探测
+   「内核是否支持加载器」，约定是 `0` 或 `-ENOENT`；一旦探测失败，整轮同步会退化成逐条调用，
+   而逐条路径**无法注册 mode 4（managed uid）**，内核的挂载过滤集合就会丢失 —— 目标应用的
+   普通进程读原始挂载表，isolated 进程读过滤表，检测器立刻看到「挂载间隙」。
+2. **首次发布前，所有 app uid 一律按受管处理**（`susfs_uid_is_managed()` 的失败安全分支）。
+   这样即使策略还没加载，同一个 app 的所有进程视图也一致。
+
+排查口诀：出现「同一应用两个进程看到的挂载表不同」时，先看
+`dmesg | grep "policy: applied"` 有没有记录、`sync.sh` 有没有打印
+`kernel has no policy loader`。
+
 ## 云编译
+
 
 `.github/workflows/build-hma-susfs.yml` 支持 `workflow_dispatch`，一次构建产出：
 

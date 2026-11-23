@@ -164,3 +164,36 @@ API 层实时计算 → 立刻隐藏；磁盘层是快照 → 没有规则。排
 - 签名：release 由 CI runner 的 debug keystore 签名（SHA-256 `fd927afd…`）。设备上现装的是
   本地构建（`main-ac7cfeb+1`，签名 `0484…`），两者不能互相覆盖升级——换装时先导出配置、
   卸载、安装、再还原。
+## 2026-11-23（续）— 挂载间隙根因：空策略文件探测失败导致 managed uid 丢失
+
+### 现象
+
+春秋 4.6.3 报「挂载间隙」，鸭子不报。diag 内核日志显示同一时刻：
+
+- `uid=10284`（春秋主进程 / 叶子进程）→ `view=RAW-mountinfo`（原始表）
+- `uid=99001`（春秋 isolated 助手）→ `view=filtered-mountinfo`（过滤表）
+
+### 根因（确定性，不是偶发）
+
+1. 内核加载器把 `len == 0`（空策略文件）当成读取错误，返回 `-EINVAL`；
+2. `sync.sh` 用空文件探测加载器，约定 `0` 或 `-ENOENT`(254) 才算「支持」→ 每次探测都被判成「没有加载器」；
+3. 于是同步走逐条回退，而回退路径无法注册 mode 4（managed uid）；
+4. 内核的 managed 集合保持为空 → 目标 app 的普通进程读原始表；
+5. 但 isolated 进程（uid 90000–99999）在内核里被硬编码为「永远受管」→ 读过滤表；
+6. 同一个 app 的两个进程看到两套表 → 春秋判定「挂载间隙」。
+
+鸭子没有「同 app 跨进程对比」，所以扫不到。
+
+### 修复
+
+- **内核**：空策略文件返回 `-ENOENT`（不是 `-EINVAL`），探测恢复正常，mode 4 每次都能落地；
+- **内核（失败安全）**：首次 publish 之前，`susfs_uid_is_managed()` 对所有 app uid 返回 true，
+  保证同一个 app 的进程在「集合尚未建立」的窗口里也永远一致；
+- **用户态**：若真的走了逐条回退且策略里有 mode 4 行，打印
+  `SUSFS_SYNC_WARN: managed uids (mode 4) need the policy loader...`，不再静默漂移。
+
+### 验证（内核 ab10032512）
+
+- 同步：`kernel applied 3694 policy entries in one supercall` + `SUSFS_SYNC_OK`；
+- 春秋扫描期视图：`filtered-mountinfo` / `filtered-mounts`，RAW 计数 = 0（主进程与 isolated 一致）；
+- 春秋：异常 1 项（仅 USB 调试）；鸭子：0 危险 / 2 警告。
