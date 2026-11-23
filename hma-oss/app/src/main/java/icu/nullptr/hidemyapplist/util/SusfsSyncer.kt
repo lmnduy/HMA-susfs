@@ -2,8 +2,11 @@ package icu.nullptr.hidemyapplist.util
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.util.Log
 import icu.nullptr.hidemyapplist.MyApp
+import icu.nullptr.hidemyapplist.common.Constants
 import icu.nullptr.hidemyapplist.service.ConfigManager
+import icu.nullptr.hidemyapplist.service.ServiceClient
 import java.io.File
 
 /**
@@ -53,6 +56,7 @@ object SusfsSyncer {
 
     private const val ASSET_NAME = "susfs_sync.sh"
     private const val CACHE_DIR_NAME = "hma_susfs"
+    private const val TAG = "SusfsSyncer"
     private const val SUCCESS_MARKER = "SUSFS_SYNC_OK"
 
     data class SyncResult(val success: Boolean, val message: String)
@@ -79,34 +83,85 @@ object SusfsSyncer {
         ConfigManager.susfsExtraPaths.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
     /**
-     * ABK: per-target hide list derived from the HMA-OSS black/white list config.
+     * ABK LIVE_PKGS_ABK: enumerate the installed packages from PackageManager.
      *
-     * @see ConfigManager.getSusfsTargetHides
+     * The replay cache used below is only filled when the manager refreshes it (app
+     * start, or a PACKAGE_ADDED broadcast while the manager happens to be alive).  A
+     * sync started from a cold process therefore used to see an EMPTY list and
+     * buildTargetsList() returned empty - which wrote an empty targets.txt and silently
+     * dropped the whole disk layer.  PackageManager is the source of truth; a full
+     * enumeration is a few milliseconds on the sync worker thread.
      */
-    fun buildTargetsList(): List<String> {
-        val cache = PackageHelper.packageCache.replayCache.lastOrNull().orEmpty()
-        if (cache.isEmpty()) return emptyList()
-
+    private fun livePackages(
+        context: Context,
+    ): Triple<MutableSet<String>, MutableSet<String>, MutableSet<String>>? {
+        val pm = context.packageManager
         val userPackages = mutableSetOf<String>()
         val systemPackages = mutableSetOf<String>()
+        val preinstalledPackages = mutableSetOf<String>()
         // ABK PREINSTALLED_VISIBLE_ABK: read-only system partitions; product/apex
         // builds (the MIUI IME) carry no SYSTEM flag, so they must be collected
         // separately and never hidden.
         val preinstalledPrefixes = listOf(
             "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
         )
-        val preinstalledPackages = mutableSetOf<String>()
-
-        cache.forEach { (pkg, entry) ->
-            val appInfo = entry.info.applicationInfo
-            val flags = appInfo?.flags ?: 0
-            if (flags and ApplicationInfo.FLAG_SYSTEM != 0) systemPackages.add(pkg)
+        val installed = try {
+            @Suppress("DEPRECATION")
+            pm.getInstalledPackages(0)
+        } catch (throwable: Throwable) {
+            ServiceClient.log(Log.WARN, TAG, "Cannot enumerate packages: ${throwable.message}")
+            return null
+        }
+        if (installed.isEmpty()) return null
+        installed.forEach { packageInfo ->
+            val appInfo = packageInfo.applicationInfo ?: return@forEach
+            val pkg = packageInfo.packageName
+            if (pkg in Constants.packagesShouldNotHide) return@forEach
+            if (appInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0) systemPackages.add(pkg)
             else userPackages.add(pkg)
-
-            val sourceDir = appInfo?.sourceDir
+            val sourceDir = appInfo.sourceDir
             if (sourceDir != null && preinstalledPrefixes.any { sourceDir.startsWith(it) }) {
                 preinstalledPackages.add(pkg)
             }
+        }
+        if (userPackages.isEmpty() && systemPackages.isEmpty()) return null
+        return Triple(userPackages, systemPackages, preinstalledPackages)
+    }
+
+    fun buildTargetsList(context: Context): List<String> {
+        val userPackages: Set<String>
+        val systemPackages: Set<String>
+        val preinstalledPackages: Set<String>
+
+        val live = livePackages(context)
+        if (live != null) {
+            userPackages = live.first
+            systemPackages = live.second
+            preinstalledPackages = live.third
+        } else {
+            // Fallback: the replay cache (a device where PackageManager throws still
+            // deserves a list rather than an empty one).
+            val cache = PackageHelper.packageCache.replayCache.lastOrNull().orEmpty()
+            if (cache.isEmpty()) return emptyList()
+
+            val user = mutableSetOf<String>()
+            val system = mutableSetOf<String>()
+            val preinstalled = mutableSetOf<String>()
+            val prefixes = listOf(
+                "/system/", "/system_ext/", "/product/", "/vendor/", "/odm/", "/cust/", "/apex/"
+            )
+            cache.forEach { (pkg, entry) ->
+                val appInfo = entry.info.applicationInfo
+                val flags = appInfo?.flags ?: 0
+                if (flags and ApplicationInfo.FLAG_SYSTEM != 0) system.add(pkg) else user.add(pkg)
+                val sourceDir = appInfo?.sourceDir
+                if (sourceDir != null && prefixes.any { sourceDir.startsWith(it) }) {
+                    preinstalled.add(pkg)
+                }
+            }
+            userPackages = user
+            systemPackages = system
+            preinstalledPackages = preinstalled
         }
 
         val installed = userPackages + systemPackages
@@ -180,7 +235,20 @@ object SusfsSyncer {
 
         pkgsFile.writeText(toFileContent(buildPkgsList()))
         extraPathsFile.writeText(toFileContent(buildExtraPathsList()))
-        targetsFile.writeText(toFileContent(buildTargetsList()))
+
+        // ABK NO_EMPTY_TARGETS_ABK: never publish an empty per-target list while the
+        // feature is on.  An empty file would make the kernel drop the whole disk
+        // layer, and the API layer keeps hiding - the exact mismatch detectors look
+        // for.  Failing loudly here leaves the previous (working) file in place.
+        val targets = buildTargetsList(context)
+        if (targets.isEmpty() && ConfigManager.susfsSyncEnabled) {
+            return SyncResult(
+                false,
+                "Refusing to sync: the target list is empty " +
+                    "(package enumeration failed). The previous list is kept.",
+            )
+        }
+        targetsFile.writeText(toFileContent(targets))
         scriptFile.writeText(script)
         enabledFile.writeText(if (ConfigManager.susfsSyncEnabled) "1\n" else "0\n")
 
