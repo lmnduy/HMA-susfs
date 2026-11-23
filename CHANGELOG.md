@@ -121,3 +121,35 @@
 
 验证：droidspace 运行时 Duck Detector 通过；手工在 `/dev` 下 bind 三个挂载
 （f2fs×2、erofs×1），app 视角全不可见、root 视角全可见。
+
+## 2026-11-23 — 目标清单改为实时枚举 + 拒绝写空清单
+
+### 修复
+
+`SusfsSyncer.buildTargetsList()` 原来只读 `PackageHelper.packageCache.replayCache`：
+
+- 管理器冷进程时该缓存为空 → 返回 `emptyList()`；
+- `sync()` 随后把 **空内容** 写进 `/data/adb/hma_susfs/targets.txt`；
+- 开机脚本重放空清单 → **磁盘层整体失效**，而 API 层仍在隐藏。
+
+改动：
+
+1. 目标清单改为 `PackageManager.getInstalledPackages(0)` 实时枚举（system/user/preinstalled
+   分类与原来一致，`Constants.packagesShouldNotHide` 仍然跳过），replay cache 只在查询抛异常时兜底；
+2. `sync()` 增加 `NO_EMPTY_TARGETS_ABK` 守卫：`susfsSyncEnabled` 时若清单为空，
+   拒绝写入并返回失败信息，保留上一份可用文件。
+
+### 复盘：为什么 Duck 报 `bin.mt.termex` 泄漏
+
+不是内核/sus_path 的问题，而是**装完没同步**：
+
+| 事实 | 值 |
+|---|---|
+| `bin.mt.termex` 安装时间 | 11-19 |
+| `targets.txt` mtime | 11-05 |
+| `policy.tsv` 中该包条目 | 0（对照 `bin.mt.plus` 有 6 条） |
+
+API 层实时计算 → 立刻隐藏；磁盘层是快照 → 没有规则。排查口诀：
+`stat -c %y targets.txt` 与目标包安装时间对比。
+
+详见 `docs/SUSFS-SYNC.md`。
